@@ -1,7 +1,7 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # mcli installer
 
-set -euo pipefail
+set -eu
 
 INSTALL_DIR="/usr/local/bin"
 BINARY_NAME="mcli"
@@ -81,13 +81,12 @@ version_compare() {
     return
   fi
 
-  local IFS='.'
-  # shellcheck disable=SC2206
-  local a=($v1) b=($v2)
-
-  local i
-  for i in 0 1 2; do
-    local n1="${a[$i]:-0}" n2="${b[$i]:-0}"
+  local i n1 n2
+  for i in 1 2 3; do
+    n1="$(echo "$v1" | cut -d. -f"$i")"
+    n2="$(echo "$v2" | cut -d. -f"$i")"
+    n1="${n1:-0}"
+    n2="${n2:-0}"
     if [ "$n1" -gt "$n2" ]; then
       echo "greater"
       return
@@ -103,9 +102,9 @@ version_compare() {
 # Download mcli to a temp file; sets TMPFILE variable
 download_mcli() {
   TMPFILE="$(mktemp)"
-  if command -v curl &>/dev/null; then
+  if command -v curl >/dev/null 2>&1; then
     curl -fsSL "${RAW_BASE_URL}/mcli" -o "$TMPFILE"
-  elif command -v wget &>/dev/null; then
+  elif command -v wget >/dev/null 2>&1; then
     wget -qO "$TMPFILE" "${RAW_BASE_URL}/mcli"
   else
     error "Neither curl nor wget found. Please install one and try again."
