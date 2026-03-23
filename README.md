@@ -31,29 +31,32 @@ This removes `mcli` from `/usr/local/bin`.
 ## Usage
 
 ```
-mcli <command> [service1 [service2 ...]] [--dry-run]
+mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 ```
 
 ### Commands
 
-| Command                | Description                                                        |
-| ---------------------- | ------------------------------------------------------------------ |
-| `list`                 | List discovered services                                           |
-| `create-network`       | Ensure the shared `services` Docker bridge network exists          |
-| `start [services..]`   | Start all or specified services                                    |
-| `stop [services..]`    | Stop all or specified services                                     |
-| `restart [services..]` | Restart all or specified services                                  |
-| `pull [services..]`    | Pull latest images for all or specified services (skips buildable) |
-| `version`              | Print version                                                      |
-| `help`                 | Show help message                                                  |
+| Command                | Description                                                       |
+| ---------------------- | ----------------------------------------------------------------- |
+| `list`                 | List discovered services (disabled services are marked)           |
+| `create-network`       | Ensure the shared `services` Docker bridge network exists         |
+| `start [services..]`   | Start all or specified services (skips disabled)                  |
+| `stop [services..]`    | Stop all or specified services (skips disabled)                   |
+| `restart [services..]` | Restart all or specified services (skips disabled)                |
+| `pull [services..]`    | Pull latest images for all or specified services (skips disabled) |
+| `disable <services..>` | Disable one or more services (excluded from start/stop/pull)      |
+| `enable <services..>`  | Re-enable one or more previously disabled services                |
+| `version`              | Print version                                                     |
+| `help`                 | Show help message                                                 |
 
 ### Options
 
 | Option      | Description                                                    |
 | ----------- | -------------------------------------------------------------- |
 | `--dry-run` | Print the commands that would be executed without running them |
+| `--all`     | Include disabled services in start/stop/restart/pull           |
 
-`--dry-run` can appear anywhere after the command.
+`--dry-run` and `--all` can appear anywhere after the command.
 
 ### Examples
 
@@ -72,6 +75,15 @@ mcli pull nginx
 
 # List all discovered services
 mcli list
+
+# Disable a service so it's skipped by start/stop/pull
+mcli disable my-service
+
+# Re-enable a previously disabled service
+mcli enable my-service
+
+# Start all services including disabled ones
+mcli start --all
 ```
 
 ## Service Discovery
@@ -87,6 +99,10 @@ The following are skipped during discovery:
 ## Shared Network
 
 All services share a Docker bridge network named `services`. Use `mcli create-network` to ensure it exists before starting services that need to communicate with each other.
+
+## Configuration
+
+Disabled services are stored in `${XDG_CONFIG_HOME:-~/.config}/mcli/disabled`. Each entry is a full path to the service directory, scoped by the working directory from which `mcli disable` was run. This means different service directories maintain independent disabled lists.
 
 ## License
 

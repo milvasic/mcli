@@ -195,6 +195,12 @@ do_uninstall() {
 
   run_cmd rm -f "$INSTALL_PATH"
   ok "mcli removed from ${INSTALL_PATH}."
+
+  local config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/mcli"
+  if [ -d "$config_dir" ]; then
+    rm -rf "$config_dir"
+    ok "Configuration directory removed: ${config_dir}"
+  fi
 }
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -11,29 +11,38 @@ usage() {
   cat <<'EOF'
 A single-file CLI for managing custom services with Docker Compose.
 
-Usage: mcli <command> [service1 [service2 ...]] [--dry-run]
+Usage: mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 
 Commands:
-  list                  - List discovered services
+  list                  - List discovered services (disabled services are marked)
   create-network        - Ensure the 'services' Docker bridge network exists
-  start [services..]    - Start all or specified services
-  stop [services..]     - Stop all or specified services
-  restart [services..]  - Restart all or specified services
-  pull [services..]     - Pull latest images for all or specified services
+  start [services..]    - Start all or specified services (skips disabled)
+  stop [services..]     - Stop all or specified services (skips disabled)
+  restart [services..]  - Restart all or specified services (skips disabled)
+  pull [services..]     - Pull latest images for all or specified services (skips disabled)
+  disable <services..>  - Disable one or more services (excluded from start/stop/pull)
+  enable <services..>   - Re-enable one or more previously disabled services
   version               - Print version
   help                  - Show this message
 
 Options:
   --dry-run             - Print commands that would be executed, but do not run them
                           (can appear anywhere after the command)
+  --all                 - Include disabled services in start/stop/restart/pull
+                          (can appear anywhere after the command)
 
 Service discovery:
   - Each service is an immediate subfolder containing a docker compose file (docker-compose.yml or docker-compose.yaml)
   - Folders in .gitignore (simple literal prefix matching only), folders with a .git directory, and symlinks are skipped
 
+Configuration:
+  Disabled services are stored in ${XDG_CONFIG_HOME:-~/.config}/mcli/disabled
+
 Usage example:
   ./mcli start
   ./mcli stop --dry-run
+  ./mcli disable my-service
+  ./mcli start --all
 EOF
   exit 1
 }
@@ -47,9 +56,40 @@ BOLD="\033[1m"
 RESET="\033[0m"
 
 dry_run=false
+include_all=false
 log() { printf "\n${BOLD}=== %s ===${RESET}\n" "$1"; }
 error() { printf "${RED}ERROR:${RESET} %s\n" "$1" >&2; }
+info() { printf "%s\n" "$1"; }
 dry_run_log() { printf "${YELLOW}[dry-run]${RESET} %s\n" "$1"; }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Configuration
+# ──────────────────────────────────────────────────────────────────────────────
+config_file() {
+  echo "${XDG_CONFIG_HOME:-$HOME/.config}/mcli/disabled"
+}
+
+get_disabled_services() {
+  local cf
+  cf=$(config_file)
+  [ -f "$cf" ] || return 0
+  local prefix
+  prefix="$(pwd)/"
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    if [[ "$line" == "$prefix"* ]]; then
+      echo "${line#"$prefix"}"
+    fi
+  done < "$cf"
+}
+
+is_service_disabled() {
+  local service="$1"
+  local cf
+  cf=$(config_file)
+  [ -f "$cf" ] || return 1
+  grep -qxF "$(pwd)/$service" "$cf"
+}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Service discovery
@@ -81,20 +121,23 @@ get_services() {
   printf '%s\n' "${services[@]}"
 }
 
-# Filter services by arguments (if any)
+# Filter services by arguments (if any), excluding disabled services unless --all
 filter_services() {
   local all_services=()
   mapfile -t all_services < <(get_services)
+  local disabled_services=()
+  mapfile -t disabled_services < <(get_disabled_services)
+
+  local candidates=()
   if [ $# -eq 0 ]; then
-    printf '%s\n' "${all_services[@]}"
+    candidates=("${all_services[@]}")
   else
-    local filtered=()
     local invalid=false
     for arg in "$@"; do
       local matched=false
       for svc in "${all_services[@]}"; do
         if [[ "$svc" == "$arg" ]]; then
-          filtered+=("$svc")
+          candidates+=("$svc")
           matched=true
         fi
       done
@@ -104,7 +147,28 @@ filter_services() {
       fi
     done
     $invalid && return 1
-    printf '%s\n' "${filtered[@]}"
+  fi
+
+  # Remove disabled services unless --all is set
+  if $include_all || [ ${#disabled_services[@]} -eq 0 ]; then
+    printf '%s\n' "${candidates[@]}"
+  else
+    for svc in "${candidates[@]}"; do
+      local is_disabled=false
+      for dsvc in "${disabled_services[@]}"; do
+        if [[ "$svc" == "$dsvc" ]]; then
+          is_disabled=true
+          break
+        fi
+      done
+      if $is_disabled; then
+        if [ $# -gt 0 ]; then
+          error "Service '$svc' is disabled (use --all to include it)"
+        fi
+      else
+        echo "$svc"
+      fi
+    done
   fi
 }
 
@@ -119,7 +183,11 @@ list_services() {
     echo "  (none found)"
   else
     for service in "${services[@]}"; do
-      echo "  $service"
+      if is_service_disabled "$service"; then
+        printf "  %s ${YELLOW}(disabled)${RESET}\n" "$service"
+      else
+        echo "  $service"
+      fi
     done
   fi
 }
@@ -193,6 +261,85 @@ restart() {
   start "$@"
 }
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Disable / Enable commands
+# ──────────────────────────────────────────────────────────────────────────────
+disable_services() {
+  if [ $# -eq 0 ]; then
+    error "Usage: mcli disable <service1> [service2 ...]"
+    return 1
+  fi
+  local all_services=()
+  mapfile -t all_services < <(get_services)
+  local invalid=false
+  for arg in "$@"; do
+    local matched=false
+    for svc in "${all_services[@]}"; do
+      [[ "$svc" == "$arg" ]] && matched=true && break
+    done
+    if ! $matched; then
+      error "Unknown service: $arg"
+      invalid=true
+    fi
+  done
+  $invalid && return 1
+
+  local cf
+  cf=$(config_file)
+  mkdir -p "$(dirname "$cf")"
+  touch "$cf"
+  for arg in "$@"; do
+    local entry
+    entry="$(pwd)/$arg"
+    if grep -qxF "$entry" "$cf"; then
+      info "$arg is already disabled"
+    else
+      echo "$entry" >> "$cf"
+      info "Disabled $arg"
+    fi
+  done
+}
+
+enable_services() {
+  if [ $# -eq 0 ]; then
+    error "Usage: mcli enable <service1> [service2 ...]"
+    return 1
+  fi
+  local all_services=()
+  mapfile -t all_services < <(get_services)
+  local invalid=false
+  for arg in "$@"; do
+    local matched=false
+    for svc in "${all_services[@]}"; do
+      [[ "$svc" == "$arg" ]] && matched=true && break
+    done
+    if ! $matched; then
+      error "Unknown service: $arg"
+      invalid=true
+    fi
+  done
+  $invalid && return 1
+
+  local cf
+  cf=$(config_file)
+  for arg in "$@"; do
+    local entry
+    entry="$(pwd)/$arg"
+    if [ -f "$cf" ] && grep -qxF "$entry" "$cf"; then
+      local tmp
+      tmp=$(grep -vxF "$entry" "$cf" || true)
+      printf '%s\n' "$tmp" > "$cf"
+      # Remove trailing empty lines left by printf on empty content
+      if [ ! -s "$cf" ] || [ -z "$(tr -d '[:space:]' < "$cf")" ]; then
+        > "$cf"
+      fi
+      info "Enabled $arg"
+    else
+      info "$arg is not disabled"
+    fi
+  done
+}
+
 pull() {
   local services=()
   local services_output
@@ -236,6 +383,10 @@ while [[ $# -gt 0 ]]; do
       dry_run=true
       shift
       ;;
+    --all)
+      include_all=true
+      shift
+      ;;
     -* )
       error "Unknown option: $1"
       exit 1
@@ -254,6 +405,8 @@ case "${COMMAND}" in
   stop)             stop "${service_args[@]}" ;;
   restart)          restart "${service_args[@]}" ;;
   pull)             pull "${service_args[@]}" ;;
+  disable)          disable_services "${service_args[@]}" ;;
+  enable)           enable_services "${service_args[@]}" ;;
   version)          echo "$VERSION" ;;
   help)             usage ;;
   *)                error "Unknown command: ${COMMAND}"; usage ;;
