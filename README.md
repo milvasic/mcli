@@ -1,0 +1,93 @@
+# mcli
+
+A single-file Bash CLI for managing Docker Compose services.
+
+Each service is an immediate subdirectory containing a `docker-compose.yml` (or `docker-compose.yaml`). `mcli` discovers these automatically and lets you start, stop, restart, and pull images for all of them — or just the ones you name.
+
+## Install
+
+```sh
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/milvasic/mcli/main/install.sh)"
+```
+
+This installs `mcli` to `/usr/local/bin`. If a previous version is already installed, the installer will prompt you to upgrade.
+
+For non-interactive environments (CI, scripts), pass `--yes` to auto-approve upgrades:
+
+```sh
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/milvasic/mcli/main/install.sh)" -- --yes
+```
+
+`wget` is also supported if `curl` is not available.
+
+## Uninstall
+
+```sh
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/milvasic/mcli/main/install.sh)" -- --uninstall
+```
+
+This removes `mcli` from `/usr/local/bin`.
+
+## Usage
+
+```
+mcli <command> [service1 [service2 ...]] [--dry-run]
+```
+
+### Commands
+
+| Command                | Description                                                        |
+| ---------------------- | ------------------------------------------------------------------ |
+| `list`                 | List discovered services                                           |
+| `create-network`       | Ensure the shared `services` Docker bridge network exists          |
+| `start [services..]`   | Start all or specified services                                    |
+| `stop [services..]`    | Stop all or specified services                                     |
+| `restart [services..]` | Restart all or specified services                                  |
+| `pull [services..]`    | Pull latest images for all or specified services (skips buildable) |
+| `version`              | Print version                                                      |
+| `help`                 | Show help message                                                  |
+
+### Options
+
+| Option      | Description                                                    |
+| ----------- | -------------------------------------------------------------- |
+| `--dry-run` | Print the commands that would be executed without running them |
+
+`--dry-run` can appear anywhere after the command.
+
+### Examples
+
+```sh
+# Start all discovered services
+mcli start
+
+# Stop specific services
+mcli stop traefik portainer
+
+# Preview what would happen without executing anything
+mcli restart --dry-run
+
+# Pull latest images for a single service
+mcli pull nginx
+
+# List all discovered services
+mcli list
+```
+
+## Service Discovery
+
+`mcli` scans immediate subdirectories of the current working directory for Docker Compose files. A folder is recognized as a service if it contains `docker-compose.yml` or `docker-compose.yaml`.
+
+The following are skipped during discovery:
+
+- Symlinks
+- Directories listed in `.gitignore` (simple literal prefix matching)
+- Directories containing a `.git` folder
+
+## Shared Network
+
+All services share a Docker bridge network named `services`. Use `mcli create-network` to ensure it exists before starting services that need to communicate with each other.
+
+## License
+
+[MIT](LICENSE)

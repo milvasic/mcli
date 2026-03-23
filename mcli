@@ -14,12 +14,12 @@ A single-file CLI for managing custom services with Docker Compose.
 Usage: mcli <command> [service1 [service2 ...]] [--dry-run]
 
 Commands:
+  list                  - List discovered services
   create-network        - Ensure the 'services' Docker bridge network exists
   start [services..]    - Start all or specified services
   stop [services..]     - Stop all or specified services
   restart [services..]  - Restart all or specified services
   pull [services..]     - Pull latest images for all or specified services
-  list                  - List discovered services
   version               - Print version
   help                  - Show this message
 
