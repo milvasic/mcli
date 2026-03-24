@@ -6,7 +6,7 @@ set -eu
 INSTALL_DIR="/usr/local/bin"
 BINARY_NAME="mcli"
 INSTALL_PATH="${INSTALL_DIR}/${BINARY_NAME}"
-RAW_BASE_URL="https://raw.githubusercontent.com/milvasic/mcli/main"
+RAW_BASE_URL="https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Colors & logging (matching mcli style)
@@ -37,13 +37,13 @@ Options:
 
 Examples:
   # Install or update interactively
-  sh -c "$(curl -fsSL https://raw.githubusercontent.com/milvasic/mcli/main/install.sh)"
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/install.sh)"
 
   # Install or update non-interactively
-  sh -c "$(curl -fsSL https://raw.githubusercontent.com/milvasic/mcli/main/install.sh)" -- --yes
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/install.sh)" -- --yes
 
   # Uninstall
-  sh -c "$(curl -fsSL https://raw.githubusercontent.com/milvasic/mcli/main/install.sh)" -- --uninstall
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/install.sh)" -- --uninstall
 EOF
   exit 1
 }
