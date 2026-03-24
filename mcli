@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-VERSION="0.1.3"
+VERSION="0.1.4"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Description (and usage)
@@ -377,7 +377,6 @@ pull() {
 }
 
 update() {
-  log "Updating mcli"
   if $dry_run; then
     dry_run_log "sh -c \"\$(curl -fsSL https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/install.sh)\""
   else
