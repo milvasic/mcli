@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-VERSION="0.1.0"
+VERSION="0.1.1"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Description (and usage)
@@ -50,10 +50,11 @@ EOF
 # ──────────────────────────────────────────────────────────────────────────────
 # Utility functions
 # ──────────────────────────────────────────────────────────────────────────────
-RED="\033[0;31m"
-YELLOW="\033[1;33m"
-BOLD="\033[1m"
-RESET="\033[0m"
+RED=$'\033[0;31m'
+YELLOW=$'\033[1;33m'
+CYAN=$'\033[0;36m'
+BOLD=$'\033[1m'
+RESET=$'\033[0m'
 
 dry_run=false
 include_all=false
@@ -118,7 +119,7 @@ get_services() {
     fi
   done
   shopt -u nullglob
-  printf '%s\n' "${services[@]}"
+  [[ ${#services[@]} -gt 0 ]] && printf '%s\n' "${services[@]}"
 }
 
 # Filter services by arguments (if any), excluding disabled services unless --all
@@ -142,7 +143,7 @@ filter_services() {
         fi
       done
       if ! $matched; then
-        error "Unknown service: $arg"
+        error "Unknown service: ${CYAN}${arg}${RESET}"
         invalid=true
       fi
     done
@@ -163,7 +164,7 @@ filter_services() {
       done
       if $is_disabled; then
         if [ $# -gt 0 ]; then
-          error "Service '$svc' is disabled (use --all to include it)"
+          error "'${CYAN}${svc}${RESET}' is disabled (use ${CYAN}--all${RESET} to include it)"
         fi
       else
         echo "$svc"
@@ -182,12 +183,21 @@ list_services() {
   if [[ ${#services[@]} -eq 0 ]]; then
     echo "  (none found)"
   else
+    local enabled=() disabled=()
     for service in "${services[@]}"; do
       if is_service_disabled "$service"; then
-        printf "  %s ${YELLOW}(disabled)${RESET}\n" "$service"
+        disabled+=("$service")
       else
-        echo "  $service"
+        enabled+=("$service")
       fi
+    done
+    IFS=$'\n' read -r -d '' -a enabled < <(printf '%s\n' "${enabled[@]}" | sort && printf '\0') || true
+    IFS=$'\n' read -r -d '' -a disabled < <(printf '%s\n' "${disabled[@]}" | sort && printf '\0') || true
+    for service in "${enabled[@]}"; do
+      printf "  ${CYAN}%s${RESET}\n" "$service"
+    done
+    for service in "${disabled[@]}"; do
+      printf "  ${CYAN}%s${RESET} ${YELLOW}(disabled)${RESET}\n" "$service"
     done
   fi
 }
@@ -213,20 +223,20 @@ start() {
   [[ -n "$services_output" ]] && mapfile -t services <<< "$services_output"
   local failed=()
   for service in "${services[@]}"; do
-    log "Starting $service"
+    log "Starting ${CYAN}${service}${RESET}"
     local cmd
     cmd="docker compose --project-directory \"$service\" up -d"
     if $dry_run; then
       dry_run_log "$cmd"
     else
       if ! eval "$cmd"; then
-        error "$service: start failed"
+        error "${CYAN}${service}${RESET} start failed"
         failed+=("$service")
       fi
     fi
   done
   if [ ${#failed[@]} -gt 0 ]; then
-    error "The following services failed to start: ${failed[*]}"
+    error "The following services failed to start: ${CYAN}${failed[*]}${RESET}"
     return 1
   fi
 }
@@ -238,20 +248,20 @@ stop() {
   [[ -n "$services_output" ]] && mapfile -t services <<< "$services_output"
   local failed=()
   for service in "${services[@]}"; do
-    log "Stopping $service"
+    log "Stopping ${CYAN}${service}${RESET}"
     local cmd
     cmd="docker compose --project-directory \"$service\" down --remove-orphans"
     if $dry_run; then
       dry_run_log "$cmd"
     else
       if ! eval "$cmd"; then
-        error "$service: stop failed"
+        error "${CYAN}${service}${RESET} stop failed"
         failed+=("$service")
       fi
     fi
   done
   if [ ${#failed[@]} -gt 0 ]; then
-    error "The following services failed to stop: ${failed[*]}"
+    error "The following services failed to stop: ${CYAN}${failed[*]}${RESET}"
     return 1
   fi
 }
@@ -278,7 +288,7 @@ disable_services() {
       [[ "$svc" == "$arg" ]] && matched=true && break
     done
     if ! $matched; then
-      error "Unknown service: $arg"
+      error "Unknown service: ${CYAN}${arg}${RESET}"
       invalid=true
     fi
   done
@@ -292,10 +302,10 @@ disable_services() {
     local entry
     entry="$(pwd)/$arg"
     if grep -qxF "$entry" "$cf"; then
-      info "$arg is already disabled"
+      info "${CYAN}${arg}${RESET} is already disabled"
     else
       echo "$entry" >> "$cf"
-      info "Disabled $arg"
+      info "${CYAN}${arg}${RESET} disabled"
     fi
   done
 }
@@ -314,7 +324,7 @@ enable_services() {
       [[ "$svc" == "$arg" ]] && matched=true && break
     done
     if ! $matched; then
-      error "Unknown service: $arg"
+      error "Unknown service: ${CYAN}${arg}${RESET}"
       invalid=true
     fi
   done
@@ -333,9 +343,9 @@ enable_services() {
       if [ ! -s "$cf" ] || [ -z "$(tr -d '[:space:]' < "$cf")" ]; then
         > "$cf"
       fi
-      info "Enabled $arg"
+      info "${CYAN}${arg}${RESET} enabled"
     else
-      info "$arg is not disabled"
+      info "${CYAN}${arg}${RESET} is already enabled"
     fi
   done
 }
@@ -347,20 +357,20 @@ pull() {
   [[ -n "$services_output" ]] && mapfile -t services <<< "$services_output"
   local failed=()
   for service in "${services[@]}"; do
-    log "Pulling images for $service (skipping buildable services)"
+    log "Pulling images for ${CYAN}${service}${RESET} (skipping buildable services)"
     local cmd
     cmd="docker compose --project-directory \"$service\" pull --ignore-buildable"
     if $dry_run; then
       dry_run_log "$cmd"
     else
       if ! eval "$cmd"; then
-        error "$service: pull failed"
+        error "${CYAN}${service}${RESET} pull failed"
         failed+=("$service")
       fi
     fi
   done
   if [ ${#failed[@]} -gt 0 ]; then
-    error "The following services failed to pull: ${failed[*]}"
+    error "The following services failed to pull: ${CYAN}${failed[*]}${RESET}"
     return 1
   fi
 }
