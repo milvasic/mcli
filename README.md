@@ -46,6 +46,7 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | `pull [services..]`    | Pull latest images for all or specified services (skips disabled) |
 | `disable <services..>` | Disable one or more services (excluded from start/stop/pull)      |
 | `enable <services..>`  | Re-enable one or more previously disabled services                |
+| `update`               | Update mcli to the latest version                                 |
 | `version`              | Print version                                                     |
 | `help`                 | Show help message                                                 |
 

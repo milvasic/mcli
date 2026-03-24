@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-VERSION="0.1.1"
+VERSION="0.1.2"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Description (and usage)
@@ -22,6 +22,7 @@ Commands:
   pull [services..]     - Pull latest images for all or specified services (skips disabled)
   disable <services..>  - Disable one or more services (excluded from start/stop/pull)
   enable <services..>   - Re-enable one or more previously disabled services
+  update                - Update mcli to the latest version
   version               - Print version
   help                  - Show this message
 
@@ -375,6 +376,15 @@ pull() {
   fi
 }
 
+update() {
+  log "Updating mcli"
+  if $dry_run; then
+    dry_run_log "sh -c \"\$(curl -fsSL https://raw.githubusercontent.com/milvasic/mcli/main/install.sh)\""
+  else
+    sh -c "$(curl -fsSL https://raw.githubusercontent.com/milvasic/mcli/main/install.sh)"
+  fi
+}
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Main dispatch
 # ──────────────────────────────────────────────────────────────────────────────
@@ -417,6 +427,7 @@ case "${COMMAND}" in
   pull)             pull "${service_args[@]}" ;;
   disable)          disable_services "${service_args[@]}" ;;
   enable)           enable_services "${service_args[@]}" ;;
+  update)           update ;;
   version)          echo "$VERSION" ;;
   help)             usage ;;
   *)                error "Unknown command: ${COMMAND}"; usage ;;
