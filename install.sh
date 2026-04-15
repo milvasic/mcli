@@ -198,8 +198,27 @@ do_uninstall() {
 
   local config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/mcli"
   if [ -d "$config_dir" ]; then
-    rm -rf "$config_dir"
-    ok "Configuration directory removed: ${config_dir}"
+    local remove_config=false
+    
+    if [ "$auto_yes" = true ]; then
+      remove_config=true
+    elif [ -t 0 ]; then
+      printf "Remove configuration directory at ${BOLD}%s${RESET}? [y/N] " "$config_dir"
+      read -r reply
+      case "$reply" in
+        [Yy]|[Yy][Ee][Ss])
+          remove_config=true
+          ;;
+      esac
+    else
+      error "Configuration directory exists at ${config_dir}"
+      error "Run interactively or pass --yes to auto-remove it."
+    fi
+    
+    if [ "$remove_config" = true ]; then
+      rm -rf "$config_dir"
+      ok "Configuration directory removed: ${config_dir}"
+    fi
   fi
 }
 

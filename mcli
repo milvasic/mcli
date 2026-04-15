@@ -3,47 +3,49 @@
 
 set -euo pipefail
 
-VERSION="0.1.4"
+VERSION="0.2.0"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Description (and usage)
 usage() {
-  cat <<'EOF'
+  cat <<EOF
 A single-file CLI for managing custom services with Docker Compose.
 
 Usage: mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 
 Commands:
-  list                  - List discovered services (disabled services are marked)
-  create-network        - Ensure the 'services' Docker bridge network exists
-  start [services..]    - Start all or specified services (skips disabled)
-  stop [services..]     - Stop all or specified services (skips disabled)
-  restart [services..]  - Restart all or specified services (skips disabled)
-  pull [services..]     - Pull latest images for all or specified services (skips disabled)
-  disable <services..>  - Disable one or more services (excluded from start/stop/pull)
-  enable <services..>   - Re-enable one or more previously disabled services
-  update                - Update mcli to the latest version
-  version               - Print version
-  help                  - Show this message
+  ${CYAN}list${RESET}                  - List discovered services (disabled services are marked)
+  ${CYAN}create-network${RESET}        - Ensure the 'services' Docker bridge network exists
+  ${CYAN}start${RESET} [services..]    - Start all or specified services (skips disabled)
+  ${CYAN}stop${RESET} [services..]     - Stop all or specified services (skips disabled)
+  ${CYAN}restart${RESET} [services..]  - Restart all or specified services (skips disabled)
+  ${CYAN}pull${RESET} [services..]     - Pull latest images for all or specified services (skips disabled)
+  ${CYAN}disable${RESET} <services..>  - Disable one or more services (excluded from start/stop/restart/pull)
+  ${CYAN}enable${RESET} <services..>   - Re-enable one or more previously disabled services
+  ${CYAN}update${RESET}                - Update mcli to the latest version
+  ${CYAN}version${RESET}               - Print version
+  ${CYAN}help${RESET}                  - Show this message
 
 Options:
-  --dry-run             - Print commands that would be executed, but do not run them
+  ${CYAN}--dry-run${RESET}             - Print commands that would be executed, but do not run them
+                          (applicable to: ${CYAN}create-network${RESET}, ${CYAN}start${RESET}, ${CYAN}stop${RESET}, ${CYAN}restart${RESET}, ${CYAN}pull${RESET}, ${CYAN}update${RESET})
                           (can appear anywhere after the command)
-  --all                 - Include disabled services in start/stop/restart/pull
+  ${CYAN}--all${RESET}                 - Include disabled services in start/stop/restart/pull
+                          (applicable to: ${CYAN}start${RESET}, ${CYAN}stop${RESET}, ${CYAN}restart${RESET}, ${CYAN}pull${RESET})
                           (can appear anywhere after the command)
 
 Service discovery:
-  - Each service is an immediate subfolder containing a docker compose file (docker-compose.yml or docker-compose.yaml)
+  - Each service is an immediate subfolder containing a docker compose file (${CYAN}docker-compose.yml${RESET} or ${CYAN}docker-compose.yaml${RESET})
   - Folders in .gitignore (simple literal prefix matching only), folders with a .git directory, and symlinks are skipped
 
 Configuration:
-  Disabled services are stored in ${XDG_CONFIG_HOME:-~/.config}/mcli/disabled
+  Disabled services are stored in ${CYAN}${XDG_CONFIG_HOME:-~/.config}/mcli/disabled${RESET}
 
 Usage example:
-  ./mcli start
-  ./mcli stop --dry-run
-  ./mcli disable my-service
-  ./mcli start --all
+  ./mcli start                        ${GREEN}# starts all enabled services by default${RESET}
+  ./mcli stop my-service --dry-run
+  ./mcli disable my-service           ${GREEN}# disables 'my-service' for future start/stop/pull commands${RESET}
+  ./mcli start --all                  ${GREEN}# includes disabled services as well${RESET}
 EOF
   exit 1
 }
@@ -52,6 +54,7 @@ EOF
 # Utility functions
 # ──────────────────────────────────────────────────────────────────────────────
 RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
 YELLOW=$'\033[1;33m'
 CYAN=$'\033[0;36m'
 BOLD=$'\033[1m'

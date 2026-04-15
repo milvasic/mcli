@@ -2,7 +2,7 @@
 
 A single-file Bash CLI for managing Docker Compose services.
 
-Each service is an immediate subdirectory containing a `docker-compose.yml` (or `docker-compose.yaml`). `mcli` discovers these automatically and lets you start, stop, restart, and pull images for all of them — or just the ones you name.
+Each service is an immediate subdirectory containing a `docker-compose.yml` (or `docker-compose.yaml`). `mcli` discovers these automatically and lets you start, stop, restart, pull images and more for all of them — or just the ones you name.
 
 ## Install
 
@@ -36,26 +36,26 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 
 ### Commands
 
-| Command                | Description                                                       |
-| ---------------------- | ----------------------------------------------------------------- |
-| `list`                 | List discovered services (disabled services are marked)           |
-| `create-network`       | Ensure the shared `services` Docker bridge network exists         |
-| `start [services..]`   | Start all or specified services (skips disabled)                  |
-| `stop [services..]`    | Stop all or specified services (skips disabled)                   |
-| `restart [services..]` | Restart all or specified services (skips disabled)                |
-| `pull [services..]`    | Pull latest images for all or specified services (skips disabled) |
-| `disable <services..>` | Disable one or more services (excluded from start/stop/pull)      |
-| `enable <services..>`  | Re-enable one or more previously disabled services                |
-| `update`               | Update mcli to the latest version                                 |
-| `version`              | Print version                                                     |
-| `help`                 | Show help message                                                 |
+| Command                | Description                                                          |
+| ---------------------- | -------------------------------------------------------------------- |
+| `list`                 | List discovered services (disabled services are marked)              |
+| `create-network`       | Ensure the shared `services` Docker bridge network exists            |
+| `start [services..]`   | Start all or specified services (skips disabled)                     |
+| `stop [services..]`    | Stop all or specified services, removing orphans (skips disabled)    |
+| `restart [services..]` | Restart all or specified services (skips disabled)                   |
+| `pull [services..]`    | Pull latest images, skipping buildable services (skips disabled)     |
+| `disable <services..>` | Disable one or more services (excluded from start/stop/restart/pull) |
+| `enable <services..>`  | Re-enable one or more previously disabled services                   |
+| `update`               | Update mcli to the latest version                                    |
+| `version`              | Print version                                                        |
+| `help`                 | Show help message                                                    |
 
 ### Options
 
-| Option      | Description                                                    |
-| ----------- | -------------------------------------------------------------- |
-| `--dry-run` | Print the commands that would be executed without running them |
-| `--all`     | Include disabled services in start/stop/restart/pull           |
+| Option      | Description                                                                                                                                 |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--dry-run` | Print the commands that would be executed without running them (applies to: `create-network`, `start`, `stop`, `restart`, `pull`, `update`) |
+| `--all`     | Include disabled services in start/stop/restart/pull (applies to: `start`, `stop`, `restart`, `pull`)                                       |
 
 `--dry-run` and `--all` can appear anywhere after the command.
 
