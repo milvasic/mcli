@@ -36,19 +36,19 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 
 ### Commands
 
-| Command                | Description                                                          |
-| ---------------------- | -------------------------------------------------------------------- |
-| `list`                 | List discovered services (disabled services are marked)              |
-| `create-network`       | Ensure the shared `services` Docker bridge network exists            |
-| `start [services..]`   | Start all or specified services (skips disabled)                     |
-| `stop [services..]`    | Stop all or specified services, removing orphans (skips disabled)    |
-| `restart [services..]` | Restart all or specified services (skips disabled)                   |
-| `pull [services..]`    | Pull latest images, skipping buildable services (skips disabled)     |
-| `disable <services..>` | Disable one or more services (excluded from start/stop/restart/pull) |
-| `enable <services..>`  | Re-enable one or more previously disabled services                   |
-| `update`               | Update mcli to the latest version                                    |
-| `version`              | Print version                                                        |
-| `help`                 | Show help message                                                    |
+| Command                      | Description                                                          |
+| ---------------------------- | -------------------------------------------------------------------- |
+| `list`                       | List discovered services (disabled services are marked)              |
+| `create-network`             | Ensure the shared `services` Docker bridge network exists            |
+| `start [services..]`         | Start all or specified services (skips disabled)                     |
+| `stop [services..]`          | Stop all or specified services, removing orphans (skips disabled)    |
+| `restart [services..]`       | Restart all or specified services (skips disabled)                   |
+| `pull [services..]`          | Pull latest images, skipping buildable services (skips disabled)     |
+| `disable <services..>`       | Disable one or more services (excluded from start/stop/restart/pull) |
+| `enable <services..>`        | Re-enable one or more previously disabled services                   |
+| `update`                     | Update mcli to the latest version                                    |
+| `version`, `--version`, `-v` | Print version                                                        |
+| `help`, `--help`, `-h`       | Show help message                                                    |
 
 ### Options
 

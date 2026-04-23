@@ -3,35 +3,35 @@
 
 set -euo pipefail
 
-VERSION="0.2.0"
+VERSION="0.2.1"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Description (and usage)
 usage() {
-  cat <<EOF
+	cat <<EOF
 A single-file CLI for managing custom services with Docker Compose.
 
-Usage: mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
+Usage: ${GREEN}mcli${RESET} ${YELLOW}<command>${RESET} [service1 [service2 ...]] [${CYAN}--dry-run${RESET}] [${CYAN}--all${RESET}]
 
 Commands:
-  ${CYAN}list${RESET}                  - List discovered services (disabled services are marked)
-  ${CYAN}create-network${RESET}        - Ensure the 'services' Docker bridge network exists
-  ${CYAN}start${RESET} [services..]    - Start all or specified services (skips disabled)
-  ${CYAN}stop${RESET} [services..]     - Stop all or specified services (skips disabled)
-  ${CYAN}restart${RESET} [services..]  - Restart all or specified services (skips disabled)
-  ${CYAN}pull${RESET} [services..]     - Pull latest images for all or specified services (skips disabled)
-  ${CYAN}disable${RESET} <services..>  - Disable one or more services (excluded from start/stop/restart/pull)
-  ${CYAN}enable${RESET} <services..>   - Re-enable one or more previously disabled services
-  ${CYAN}update${RESET}                - Update mcli to the latest version
-  ${CYAN}version${RESET}               - Print version
-  ${CYAN}help${RESET}                  - Show this message
+  ${YELLOW}list${RESET}                   - List discovered services (disabled services are marked)
+  ${YELLOW}create-network${RESET}         - Ensure the 'services' Docker bridge network exists
+  ${YELLOW}start${RESET} [services..]     - Start all or specified services (skips disabled)
+  ${YELLOW}stop${RESET} [services..]      - Stop all or specified services (skips disabled)
+  ${YELLOW}restart${RESET} [services..]   - Restart all or specified services (skips disabled)
+  ${YELLOW}pull${RESET} [services..]      - Pull latest images for all or specified services (skips disabled)
+  ${YELLOW}disable${RESET} <services..>   - Disable one or more services (excluded from ${YELLOW}start${RESET}/${YELLOW}stop${RESET}/${YELLOW}restart${RESET}/${YELLOW}pull${RESET})
+  ${YELLOW}enable${RESET} <services..>    - Re-enable one or more previously disabled services
+  ${YELLOW}update${RESET}                 - Update mcli to the latest version
+  ${YELLOW}version${RESET}, ${CYAN}--version${RESET}, ${CYAN}-v${RESET} - Print version
+  ${YELLOW}help, ${CYAN}--help${RESET}, ${CYAN}-h${RESET}       - Show this message
 
 Options:
   ${CYAN}--dry-run${RESET}             - Print commands that would be executed, but do not run them
-                          (applicable to: ${CYAN}create-network${RESET}, ${CYAN}start${RESET}, ${CYAN}stop${RESET}, ${CYAN}restart${RESET}, ${CYAN}pull${RESET}, ${CYAN}update${RESET})
+                          (applicable to: ${YELLOW}create-network${RESET}, ${YELLOW}start${RESET}, ${YELLOW}stop${RESET}, ${YELLOW}restart${RESET}, ${YELLOW}pull${RESET}, ${YELLOW}update${RESET})
                           (can appear anywhere after the command)
   ${CYAN}--all${RESET}                 - Include disabled services in start/stop/restart/pull
-                          (applicable to: ${CYAN}start${RESET}, ${CYAN}stop${RESET}, ${CYAN}restart${RESET}, ${CYAN}pull${RESET})
+                          (applicable to: ${YELLOW}start${RESET}, ${YELLOW}stop${RESET}, ${YELLOW}restart${RESET}, ${YELLOW}pull${RESET})
                           (can appear anywhere after the command)
 
 Service discovery:
@@ -42,12 +42,12 @@ Configuration:
   Disabled services are stored in ${CYAN}${XDG_CONFIG_HOME:-~/.config}/mcli/disabled${RESET}
 
 Usage example:
-  ./mcli start                        ${GREEN}# starts all enabled services by default${RESET}
-  ./mcli stop my-service --dry-run
-  ./mcli disable my-service           ${GREEN}# disables 'my-service' for future start/stop/pull commands${RESET}
-  ./mcli start --all                  ${GREEN}# includes disabled services as well${RESET}
+  ${GREEN}mcli${RESET} ${YELLOW}start${RESET}                        ${GREEN}# starts all enabled services by default${RESET}
+  ${GREEN}mcli${RESET} ${YELLOW}stop${RESET} my-service ${CYAN}--dry-run${RESET}
+  ${GREEN}mcli${RESET} ${YELLOW}disable${RESET} my-service           ${GREEN}# disables 'my-service' for future start/stop/pull commands${RESET}
+  ${GREEN}mcli${RESET} ${YELLOW}start${RESET} ${CYAN}--all${RESET}                  ${GREEN}# includes disabled services as well${RESET}
 EOF
-  exit 1
+	exit 1
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -55,7 +55,7 @@ EOF
 # ──────────────────────────────────────────────────────────────────────────────
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
-YELLOW=$'\033[1;33m'
+YELLOW=$'\033[0;33m'
 CYAN=$'\033[0;36m'
 BOLD=$'\033[1m'
 RESET=$'\033[0m'
@@ -71,327 +71,327 @@ dry_run_log() { printf "${YELLOW}[dry-run]${RESET} %s\n" "$1"; }
 # Configuration
 # ──────────────────────────────────────────────────────────────────────────────
 config_file() {
-  echo "${XDG_CONFIG_HOME:-$HOME/.config}/mcli/disabled"
+	echo "${XDG_CONFIG_HOME:-$HOME/.config}/mcli/disabled"
 }
 
 get_disabled_services() {
-  local cf
-  cf=$(config_file)
-  [ -f "$cf" ] || return 0
-  local prefix
-  prefix="$(pwd)/"
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    if [[ "$line" == "$prefix"* ]]; then
-      echo "${line#"$prefix"}"
-    fi
-  done < "$cf"
+	local cf
+	cf=$(config_file)
+	[ -f "$cf" ] || return 0
+	local prefix
+	prefix="$(pwd)/"
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		if [[ "$line" == "$prefix"* ]]; then
+			echo "${line#"$prefix"}"
+		fi
+	done <"$cf"
 }
 
 is_service_disabled() {
-  local service="$1"
-  local cf
-  cf=$(config_file)
-  [ -f "$cf" ] || return 1
-  grep -qxF "$(pwd)/$service" "$cf"
+	local service="$1"
+	local cf
+	cf=$(config_file)
+	[ -f "$cf" ] || return 1
+	grep -qxF "$(pwd)/$service" "$cf"
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Service discovery
 # ──────────────────────────────────────────────────────────────────────────────
 get_services() {
-  local services=()
-  local gitignore=()
-  if [ -f .gitignore ]; then
-    mapfile -t gitignore < <(grep -v '^#' .gitignore | grep -v '^$' || true)
-  fi
-  shopt -s nullglob
-  for dir in */ ; do
-    # skip if not a directory
-    [ -d "$dir" ] || continue
-    # skip symlinks
-    [ -L "$dir" ] && continue
-    # skip .gitignore entries (simple literal prefix matching only; full gitignore glob syntax is not supported)
-    for ignore in "${gitignore[@]}"; do
-      [[ "$dir" == "$ignore"* ]] && continue 2
-    done
-    # skip if .git exists in the folder
-    [ -d "$dir/.git" ] && continue
-    # must have docker-compose.yml or docker-compose.yaml
-    if [ -f "$dir/docker-compose.yml" ] || [ -f "$dir/docker-compose.yaml" ]; then
-      services+=("${dir%/}")
-    fi
-  done
-  shopt -u nullglob
-  [[ ${#services[@]} -gt 0 ]] && printf '%s\n' "${services[@]}"
+	local services=()
+	local gitignore=()
+	if [ -f .gitignore ]; then
+		mapfile -t gitignore < <(grep -v '^#' .gitignore | grep -v '^$' || true)
+	fi
+	shopt -s nullglob
+	for dir in */; do
+		# skip if not a directory
+		[ -d "$dir" ] || continue
+		# skip symlinks
+		[ -L "$dir" ] && continue
+		# skip .gitignore entries (simple literal prefix matching only; full gitignore glob syntax is not supported)
+		for ignore in "${gitignore[@]}"; do
+			[[ "$dir" == "$ignore"* ]] && continue 2
+		done
+		# skip if .git exists in the folder
+		[ -d "$dir/.git" ] && continue
+		# must have docker-compose.yml or docker-compose.yaml
+		if [ -f "$dir/docker-compose.yml" ] || [ -f "$dir/docker-compose.yaml" ]; then
+			services+=("${dir%/}")
+		fi
+	done
+	shopt -u nullglob
+	[[ ${#services[@]} -gt 0 ]] && printf '%s\n' "${services[@]}"
 }
 
 # Filter services by arguments (if any), excluding disabled services unless --all
 filter_services() {
-  local all_services=()
-  mapfile -t all_services < <(get_services)
-  local disabled_services=()
-  mapfile -t disabled_services < <(get_disabled_services)
+	local all_services=()
+	mapfile -t all_services < <(get_services)
+	local disabled_services=()
+	mapfile -t disabled_services < <(get_disabled_services)
 
-  local candidates=()
-  if [ $# -eq 0 ]; then
-    candidates=("${all_services[@]}")
-  else
-    local invalid=false
-    for arg in "$@"; do
-      local matched=false
-      for svc in "${all_services[@]}"; do
-        if [[ "$svc" == "$arg" ]]; then
-          candidates+=("$svc")
-          matched=true
-        fi
-      done
-      if ! $matched; then
-        error "Unknown service: ${CYAN}${arg}${RESET}"
-        invalid=true
-      fi
-    done
-    $invalid && return 1
-  fi
+	local candidates=()
+	if [ $# -eq 0 ]; then
+		candidates=("${all_services[@]}")
+	else
+		local invalid=false
+		for arg in "$@"; do
+			local matched=false
+			for svc in "${all_services[@]}"; do
+				if [[ "$svc" == "$arg" ]]; then
+					candidates+=("$svc")
+					matched=true
+				fi
+			done
+			if ! $matched; then
+				error "Unknown service: ${CYAN}${arg}${RESET}"
+				invalid=true
+			fi
+		done
+		$invalid && return 1
+	fi
 
-  # Remove disabled services unless --all is set
-  if $include_all || [ ${#disabled_services[@]} -eq 0 ]; then
-    printf '%s\n' "${candidates[@]}"
-  else
-    for svc in "${candidates[@]}"; do
-      local is_disabled=false
-      for dsvc in "${disabled_services[@]}"; do
-        if [[ "$svc" == "$dsvc" ]]; then
-          is_disabled=true
-          break
-        fi
-      done
-      if $is_disabled; then
-        if [ $# -gt 0 ]; then
-          error "'${CYAN}${svc}${RESET}' is disabled (use ${CYAN}--all${RESET} to include it)"
-        fi
-      else
-        echo "$svc"
-      fi
-    done
-  fi
+	# Remove disabled services unless --all is set
+	if $include_all || [ ${#disabled_services[@]} -eq 0 ]; then
+		printf '%s\n' "${candidates[@]}"
+	else
+		for svc in "${candidates[@]}"; do
+			local is_disabled=false
+			for dsvc in "${disabled_services[@]}"; do
+				if [[ "$svc" == "$dsvc" ]]; then
+					is_disabled=true
+					break
+				fi
+			done
+			if $is_disabled; then
+				if [ $# -gt 0 ]; then
+					error "'${CYAN}${svc}${RESET}' is disabled (use ${CYAN}--all${RESET} to include it)"
+				fi
+			else
+				echo "$svc"
+			fi
+		done
+	fi
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # List command
 # ──────────────────────────────────────────────────────────────────────────────
 list_services() {
-  log "Discovered services:"
-  local services=()
-  mapfile -t services < <(get_services)
-  if [[ ${#services[@]} -eq 0 ]]; then
-    echo "  (none found)"
-  else
-    local enabled=() disabled=()
-    for service in "${services[@]}"; do
-      if is_service_disabled "$service"; then
-        disabled+=("$service")
-      else
-        enabled+=("$service")
-      fi
-    done
-    IFS=$'\n' read -r -d '' -a enabled < <(printf '%s\n' "${enabled[@]}" | sort && printf '\0') || true
-    IFS=$'\n' read -r -d '' -a disabled < <(printf '%s\n' "${disabled[@]}" | sort && printf '\0') || true
-    for service in "${enabled[@]}"; do
-      printf "  ${CYAN}%s${RESET}\n" "$service"
-    done
-    for service in "${disabled[@]}"; do
-      printf "  ${CYAN}%s${RESET} ${YELLOW}(disabled)${RESET}\n" "$service"
-    done
-  fi
+	log "Discovered services:"
+	local services=()
+	mapfile -t services < <(get_services)
+	if [[ ${#services[@]} -eq 0 ]]; then
+		echo "  (none found)"
+	else
+		local enabled=() disabled=()
+		for service in "${services[@]}"; do
+			if is_service_disabled "$service"; then
+				disabled+=("$service")
+			else
+				enabled+=("$service")
+			fi
+		done
+		IFS=$'\n' read -r -d '' -a enabled < <(printf '%s\n' "${enabled[@]}" | sort && printf '\0') || true
+		IFS=$'\n' read -r -d '' -a disabled < <(printf '%s\n' "${disabled[@]}" | sort && printf '\0') || true
+		for service in "${enabled[@]}"; do
+			printf "  ${CYAN}%s${RESET}\n" "$service"
+		done
+		for service in "${disabled[@]}"; do
+			printf "  ${CYAN}%s${RESET} ${YELLOW}(disabled)${RESET}\n" "$service"
+		done
+	fi
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Core commands
 # ──────────────────────────────────────────────────────────────────────────────
 create_network() {
-  log "Ensuring Docker network 'services' exists"
-  if $dry_run; then
-    dry_run_log "docker network inspect services || docker network create --driver bridge services"
-  elif docker network inspect services >/dev/null 2>&1; then
-    log "Network 'services' already exists"
-  else
-    docker network create --driver bridge services
-  fi
+	log "Ensuring Docker network 'services' exists"
+	if $dry_run; then
+		dry_run_log "docker network inspect services || docker network create --driver bridge services"
+	elif docker network inspect services >/dev/null 2>&1; then
+		log "Network 'services' already exists"
+	else
+		docker network create --driver bridge services
+	fi
 }
 
 start() {
-  local services=()
-  local services_output
-  services_output=$(filter_services "$@") || return 1
-  [[ -n "$services_output" ]] && mapfile -t services <<< "$services_output"
-  local failed=()
-  for service in "${services[@]}"; do
-    log "Starting ${CYAN}${service}${RESET}"
-    local cmd
-    cmd="docker compose --project-directory \"$service\" up -d"
-    if $dry_run; then
-      dry_run_log "$cmd"
-    else
-      if ! eval "$cmd"; then
-        error "${CYAN}${service}${RESET} start failed"
-        failed+=("$service")
-      fi
-    fi
-  done
-  if [ ${#failed[@]} -gt 0 ]; then
-    error "The following services failed to start: ${CYAN}${failed[*]}${RESET}"
-    return 1
-  fi
+	local services=()
+	local services_output
+	services_output=$(filter_services "$@") || return 1
+	[[ -n "$services_output" ]] && mapfile -t services <<<"$services_output"
+	local failed=()
+	for service in "${services[@]}"; do
+		log "Starting ${CYAN}${service}${RESET}"
+		local cmd
+		cmd="docker compose --project-directory \"$service\" up -d"
+		if $dry_run; then
+			dry_run_log "$cmd"
+		else
+			if ! eval "$cmd"; then
+				error "${CYAN}${service}${RESET} start failed"
+				failed+=("$service")
+			fi
+		fi
+	done
+	if [ ${#failed[@]} -gt 0 ]; then
+		error "The following services failed to start: ${CYAN}${failed[*]}${RESET}"
+		return 1
+	fi
 }
 
 stop() {
-  local services=()
-  local services_output
-  services_output=$(filter_services "$@") || return 1
-  [[ -n "$services_output" ]] && mapfile -t services <<< "$services_output"
-  local failed=()
-  for service in "${services[@]}"; do
-    log "Stopping ${CYAN}${service}${RESET}"
-    local cmd
-    cmd="docker compose --project-directory \"$service\" down --remove-orphans"
-    if $dry_run; then
-      dry_run_log "$cmd"
-    else
-      if ! eval "$cmd"; then
-        error "${CYAN}${service}${RESET} stop failed"
-        failed+=("$service")
-      fi
-    fi
-  done
-  if [ ${#failed[@]} -gt 0 ]; then
-    error "The following services failed to stop: ${CYAN}${failed[*]}${RESET}"
-    return 1
-  fi
+	local services=()
+	local services_output
+	services_output=$(filter_services "$@") || return 1
+	[[ -n "$services_output" ]] && mapfile -t services <<<"$services_output"
+	local failed=()
+	for service in "${services[@]}"; do
+		log "Stopping ${CYAN}${service}${RESET}"
+		local cmd
+		cmd="docker compose --project-directory \"$service\" down --remove-orphans"
+		if $dry_run; then
+			dry_run_log "$cmd"
+		else
+			if ! eval "$cmd"; then
+				error "${CYAN}${service}${RESET} stop failed"
+				failed+=("$service")
+			fi
+		fi
+	done
+	if [ ${#failed[@]} -gt 0 ]; then
+		error "The following services failed to stop: ${CYAN}${failed[*]}${RESET}"
+		return 1
+	fi
 }
 
 restart() {
-  stop "$@" || return 1
-  start "$@"
+	stop "$@" || return 1
+	start "$@"
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Disable / Enable commands
 # ──────────────────────────────────────────────────────────────────────────────
 disable_services() {
-  if [ $# -eq 0 ]; then
-    error "Usage: mcli disable <service1> [service2 ...]"
-    return 1
-  fi
-  local all_services=()
-  mapfile -t all_services < <(get_services)
-  local invalid=false
-  for arg in "$@"; do
-    local matched=false
-    for svc in "${all_services[@]}"; do
-      [[ "$svc" == "$arg" ]] && matched=true && break
-    done
-    if ! $matched; then
-      error "Unknown service: ${CYAN}${arg}${RESET}"
-      invalid=true
-    fi
-  done
-  $invalid && return 1
+	if [ $# -eq 0 ]; then
+		error "Usage: mcli disable <service1> [service2 ...]"
+		return 1
+	fi
+	local all_services=()
+	mapfile -t all_services < <(get_services)
+	local invalid=false
+	for arg in "$@"; do
+		local matched=false
+		for svc in "${all_services[@]}"; do
+			[[ "$svc" == "$arg" ]] && matched=true && break
+		done
+		if ! $matched; then
+			error "Unknown service: ${CYAN}${arg}${RESET}"
+			invalid=true
+		fi
+	done
+	$invalid && return 1
 
-  local cf
-  cf=$(config_file)
-  mkdir -p "$(dirname "$cf")"
-  touch "$cf"
-  for arg in "$@"; do
-    local entry
-    entry="$(pwd)/$arg"
-    if grep -qxF "$entry" "$cf"; then
-      info "${CYAN}${arg}${RESET} is already disabled"
-    else
-      echo "$entry" >> "$cf"
-      info "${CYAN}${arg}${RESET} disabled"
-    fi
-  done
+	local cf
+	cf=$(config_file)
+	mkdir -p "$(dirname "$cf")"
+	touch "$cf"
+	for arg in "$@"; do
+		local entry
+		entry="$(pwd)/$arg"
+		if grep -qxF "$entry" "$cf"; then
+			info "${CYAN}${arg}${RESET} is already disabled"
+		else
+			echo "$entry" >>"$cf"
+			info "${CYAN}${arg}${RESET} disabled"
+		fi
+	done
 }
 
 enable_services() {
-  if [ $# -eq 0 ]; then
-    error "Usage: mcli enable <service1> [service2 ...]"
-    return 1
-  fi
-  local all_services=()
-  mapfile -t all_services < <(get_services)
-  local invalid=false
-  for arg in "$@"; do
-    local matched=false
-    for svc in "${all_services[@]}"; do
-      [[ "$svc" == "$arg" ]] && matched=true && break
-    done
-    if ! $matched; then
-      error "Unknown service: ${CYAN}${arg}${RESET}"
-      invalid=true
-    fi
-  done
-  $invalid && return 1
+	if [ $# -eq 0 ]; then
+		error "Usage: mcli enable <service1> [service2 ...]"
+		return 1
+	fi
+	local all_services=()
+	mapfile -t all_services < <(get_services)
+	local invalid=false
+	for arg in "$@"; do
+		local matched=false
+		for svc in "${all_services[@]}"; do
+			[[ "$svc" == "$arg" ]] && matched=true && break
+		done
+		if ! $matched; then
+			error "Unknown service: ${CYAN}${arg}${RESET}"
+			invalid=true
+		fi
+	done
+	$invalid && return 1
 
-  local cf
-  cf=$(config_file)
-  for arg in "$@"; do
-    local entry
-    entry="$(pwd)/$arg"
-    if [ -f "$cf" ] && grep -qxF "$entry" "$cf"; then
-      local tmp
-      tmp=$(grep -vxF "$entry" "$cf" || true)
-      printf '%s\n' "$tmp" > "$cf"
-      # Remove trailing empty lines left by printf on empty content
-      if [ ! -s "$cf" ] || [ -z "$(tr -d '[:space:]' < "$cf")" ]; then
-        > "$cf"
-      fi
-      info "${CYAN}${arg}${RESET} enabled"
-    else
-      info "${CYAN}${arg}${RESET} is already enabled"
-    fi
-  done
+	local cf
+	cf=$(config_file)
+	for arg in "$@"; do
+		local entry
+		entry="$(pwd)/$arg"
+		if [ -f "$cf" ] && grep -qxF "$entry" "$cf"; then
+			local tmp
+			tmp=$(grep -vxF "$entry" "$cf" || true)
+			printf '%s\n' "$tmp" >"$cf"
+			# Remove trailing empty lines left by printf on empty content
+			if [ ! -s "$cf" ] || [ -z "$(tr -d '[:space:]' <"$cf")" ]; then
+				>"$cf"
+			fi
+			info "${CYAN}${arg}${RESET} enabled"
+		else
+			info "${CYAN}${arg}${RESET} is already enabled"
+		fi
+	done
 }
 
 pull() {
-  local services=()
-  local services_output
-  services_output=$(filter_services "$@") || return 1
-  [[ -n "$services_output" ]] && mapfile -t services <<< "$services_output"
-  local failed=()
-  for service in "${services[@]}"; do
-    log "Pulling images for ${CYAN}${service}${RESET} (skipping buildable services)"
-    local cmd
-    cmd="docker compose --project-directory \"$service\" pull --ignore-buildable"
-    if $dry_run; then
-      dry_run_log "$cmd"
-    else
-      if ! eval "$cmd"; then
-        error "${CYAN}${service}${RESET} pull failed"
-        failed+=("$service")
-      fi
-    fi
-  done
-  if [ ${#failed[@]} -gt 0 ]; then
-    error "The following services failed to pull: ${CYAN}${failed[*]}${RESET}"
-    return 1
-  fi
+	local services=()
+	local services_output
+	services_output=$(filter_services "$@") || return 1
+	[[ -n "$services_output" ]] && mapfile -t services <<<"$services_output"
+	local failed=()
+	for service in "${services[@]}"; do
+		log "Pulling images for ${CYAN}${service}${RESET} (skipping buildable services)"
+		local cmd
+		cmd="docker compose --project-directory \"$service\" pull --ignore-buildable"
+		if $dry_run; then
+			dry_run_log "$cmd"
+		else
+			if ! eval "$cmd"; then
+				error "${CYAN}${service}${RESET} pull failed"
+				failed+=("$service")
+			fi
+		fi
+	done
+	if [ ${#failed[@]} -gt 0 ]; then
+		error "The following services failed to pull: ${CYAN}${failed[*]}${RESET}"
+		return 1
+	fi
 }
 
 update() {
-  if $dry_run; then
-    dry_run_log "sh -c \"\$(curl -fsSL https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/install.sh)\""
-  else
-    sh -c "$(curl -fsSL https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/install.sh)"
-  fi
+	if $dry_run; then
+		dry_run_log "sh -c \"\$(curl -fsSL https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/install.sh)\""
+	else
+		sh -c "$(curl -fsSL https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/install.sh)"
+	fi
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Main dispatch
 # ──────────────────────────────────────────────────────────────────────────────
 if [ $# -lt 1 ]; then
-  usage
+	usage
 fi
 
 COMMAND=$1
@@ -400,37 +400,40 @@ shift
 # parse options, collect service names after options
 service_args=()
 while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --dry-run)
-      dry_run=true
-      shift
-      ;;
-    --all)
-      include_all=true
-      shift
-      ;;
-    -* )
-      error "Unknown option: $1"
-      exit 1
-      ;;
-    * )
-      service_args+=("$1")
-      shift
-      ;;
-  esac
+	case "$1" in
+	--dry-run)
+		dry_run=true
+		shift
+		;;
+	--all)
+		include_all=true
+		shift
+		;;
+	-*)
+		error "Unknown option: $1"
+		exit 1
+		;;
+	*)
+		service_args+=("$1")
+		shift
+		;;
+	esac
 done
 
 case "${COMMAND}" in
-  list)             list_services ;;
-  create-network)   create_network ;;
-  start)            start "${service_args[@]}" ;;
-  stop)             stop "${service_args[@]}" ;;
-  restart)          restart "${service_args[@]}" ;;
-  pull)             pull "${service_args[@]}" ;;
-  disable)          disable_services "${service_args[@]}" ;;
-  enable)           enable_services "${service_args[@]}" ;;
-  update)           update ;;
-  version)          echo "$VERSION" ;;
-  help)             usage ;;
-  *)                error "Unknown command: ${COMMAND}"; usage ;;
+list) list_services ;;
+create-network) create_network ;;
+start) start "${service_args[@]}" ;;
+stop) stop "${service_args[@]}" ;;
+restart) restart "${service_args[@]}" ;;
+pull) pull "${service_args[@]}" ;;
+disable) disable_services "${service_args[@]}" ;;
+enable) enable_services "${service_args[@]}" ;;
+update) update ;;
+version | --version | -v) echo "$VERSION" ;;
+help | --help | -h) usage ;;
+*)
+	error "Unknown command: ${COMMAND}"
+	usage
+	;;
 esac
