@@ -1,75 +1,101 @@
 #!/usr/bin/env bash
-# mcli
+# mcli — manage custom services with Docker Compose
+# https://github.com/milvasic/mcli
 
 set -euo pipefail
 
-VERSION="0.2.1"
+VERSION="0.3.0"
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Description (and usage)
-usage() {
-	cat <<EOF
+# ── Help ──────────────────────────────────────────────────────────────────────
+help() {
+	colorize >&2 <<'EOF'
 A single-file CLI for managing custom services with Docker Compose.
 
-Usage: ${GREEN}mcli${RESET} ${YELLOW}<command>${RESET} [service1 [service2 ...]] [${CYAN}--dry-run${RESET}] [${CYAN}--all${RESET}]
+Usage: mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 
 Commands:
-  ${YELLOW}list${RESET}                   - List discovered services (disabled services are marked)
-  ${YELLOW}create-network${RESET}         - Ensure the 'services' Docker bridge network exists
-  ${YELLOW}start${RESET} [services..]     - Start all or specified services (skips disabled)
-  ${YELLOW}stop${RESET} [services..]      - Stop all or specified services (skips disabled)
-  ${YELLOW}restart${RESET} [services..]   - Restart all or specified services (skips disabled)
-  ${YELLOW}pull${RESET} [services..]      - Pull latest images for all or specified services (skips disabled)
-  ${YELLOW}disable${RESET} <services..>   - Disable one or more services (excluded from ${YELLOW}start${RESET}/${YELLOW}stop${RESET}/${YELLOW}restart${RESET}/${YELLOW}pull${RESET})
-  ${YELLOW}enable${RESET} <services..>    - Re-enable one or more previously disabled services
-  ${YELLOW}update${RESET}                 - Update mcli to the latest version
-  ${YELLOW}version${RESET}, ${CYAN}--version${RESET}, ${CYAN}-v${RESET} - Print version
-  ${YELLOW}help, ${CYAN}--help${RESET}, ${CYAN}-h${RESET}       - Show this message
+  list                      # List discovered services (disabled services are marked)
+  create-network            # Ensure the 'services' Docker bridge network exists
+  start [services..]        # Start all or specified services (skips disabled)
+  stop [services..]         # Stop all or specified services (skips disabled)
+  restart [services..]      # Restart all or specified services (skips disabled)
+  pull [services..]         # Pull latest images for all or specified services (skips disabled)
+  disable <services..>      # Disable one or more services (excluded from start/stop/restart/pull)
+  enable <services..>       # Re-enable one or more previously disabled services
+  update                    # Update mcli to the latest version
+  version, --version, -v    # Print version
+  help, --help, -h          # Show this message
 
 Options:
-  ${CYAN}--dry-run${RESET}             - Print commands that would be executed, but do not run them
-                          (applicable to: ${YELLOW}create-network${RESET}, ${YELLOW}start${RESET}, ${YELLOW}stop${RESET}, ${YELLOW}restart${RESET}, ${YELLOW}pull${RESET}, ${YELLOW}update${RESET})
-                          (can appear anywhere after the command)
-  ${CYAN}--all${RESET}                 - Include disabled services in start/stop/restart/pull
-                          (applicable to: ${YELLOW}start${RESET}, ${YELLOW}stop${RESET}, ${YELLOW}restart${RESET}, ${YELLOW}pull${RESET})
-                          (can appear anywhere after the command)
+  --dry-run                 # Print commands that would be executed, but do not run them
+                            #   (applicable to: create-network, start, stop, restart, pull, update)
+                            #   (can appear anywhere after the command)
+  --all                     # Include disabled services in start/stop/restart/pull
+                            #   (applicable to: start, stop, restart, pull)
+                            #   (can appear anywhere after the command)
 
 Service discovery:
-  - Each service is an immediate subfolder containing a docker compose file (${CYAN}docker-compose.yml${RESET} or ${CYAN}docker-compose.yaml${RESET})
+  - Each service is an immediate subfolder containing a docker compose file (docker-compose.yml or docker-compose.yaml)
   - Folders in .gitignore (simple literal prefix matching only), folders with a .git directory, and symlinks are skipped
 
 Configuration:
-  Disabled services are stored in ${CYAN}${XDG_CONFIG_HOME:-~/.config}/mcli/disabled${RESET}
+  Disabled services are stored in ${XDG_CONFIG_HOME:-~/.config}/mcli/disabled
 
 Usage example:
-  ${GREEN}mcli${RESET} ${YELLOW}start${RESET}                        ${GREEN}# starts all enabled services by default${RESET}
-  ${GREEN}mcli${RESET} ${YELLOW}stop${RESET} my-service ${CYAN}--dry-run${RESET}
-  ${GREEN}mcli${RESET} ${YELLOW}disable${RESET} my-service           ${GREEN}# disables 'my-service' for future start/stop/pull commands${RESET}
-  ${GREEN}mcli${RESET} ${YELLOW}start${RESET} ${CYAN}--all${RESET}                  ${GREEN}# includes disabled services as well${RESET}
+  mcli start                        # starts all enabled services by default
+  mcli stop my-service --dry-run
+  mcli disable my-service           # disables 'my-service' for future start/stop/pull commands
+  mcli start --all                  # includes disabled services as well
 EOF
 	exit 1
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Utility functions
-# ──────────────────────────────────────────────────────────────────────────────
-RED=$'\033[0;31m'
-GREEN=$'\033[0;32m'
-YELLOW=$'\033[0;33m'
-CYAN=$'\033[0;36m'
-BOLD=$'\033[1m'
-RESET=$'\033[0m'
+# ── Colors & logging ──────────────────────────────────────────────────────────
+if [ -t 1 ]; then
+	RED=$'\033[0;31m'
+	GREEN=$'\033[0;32m'
+	YELLOW=$'\033[0;33m'
+	CYAN=$'\033[0;36m'
+	BOLD=$'\033[1m'
+	RESET=$'\033[0m'
+else
+	RED=""
+	GREEN=""
+	YELLOW=""
+	CYAN=""
+	BOLD=""
+	RESET=""
+fi
 
-dry_run=false
-include_all=false
-log() { printf "\n${BOLD}=== %s ===${RESET}\n" "$1"; }
+log() { printf "\n${BOLD}=== %s ===${RESET}\n" "$1" >&2; }
+dry_run_log() { printf "${YELLOW}[dry-run]${RESET} %s\n" "$1" >&2; }
 error() { printf "${RED}ERROR:${RESET} %s\n" "$1" >&2; }
-info() { printf "%s\n" "$1"; }
-dry_run_log() { printf "${YELLOW}[dry-run]${RESET} %s\n" "$1"; }
+ok() { printf "${GREEN}%s${RESET}\n" "$1"; }
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Configuration
-# ──────────────────────────────────────────────────────────────────────────────
+# ── Help colorizer ───────────────────────────────────────────────────────────
+colorize_line() {
+	sed \
+		-e "s/\\(^\\|[^[:alnum:]_'-]\\)\\(mcli\\)\\([^[:alnum:]_'-]\\|$\\)/\\1${GREEN}\\2${RESET}\\3/g" \
+		-e "s/\\(^\\|[^[:alnum:]_'-]\\)\\(list\\|create-network\\|start\\|stop\\|restart\\|pull\\|enable\\|disable\\|update\\|version\\|help\\)\\([^[:alnum:]_'-]\\|$\\)/\\1${YELLOW}\\2${RESET}\\3/g" \
+		-e "s/--[a-z][a-z-]*/${CYAN}&${RESET}/g" \
+		-e "s/\([ ,]\)\(-[a-z]\)/\\1${CYAN}\\2${RESET}/g"
+}
+
+colorize() {
+	local line pre post
+	while IFS= read -r line; do
+		if [[ "$line" == *'#'* ]]; then
+			pre="${line%%#*}"
+			post="${line#*#}"
+			pre="$(printf '%s' "$pre" | colorize_line)"
+			printf '%s%s#%s%s\n' "$pre" "$GREEN" "$post" "$RESET"
+		else
+			printf '%s\n' "$line" | colorize_line
+		fi
+	done
+}
+
+# ── Configuration ─────────────────────────────────────────────────────────────
 config_file() {
 	echo "${XDG_CONFIG_HOME:-$HOME/.config}/mcli/disabled"
 }
@@ -96,9 +122,7 @@ is_service_disabled() {
 	grep -qxF "$(pwd)/$service" "$cf"
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Service discovery
-# ──────────────────────────────────────────────────────────────────────────────
+# ── Service discovery ─────────────────────────────────────────────────────────
 get_services() {
 	local services=()
 	local gitignore=()
@@ -177,10 +201,8 @@ filter_services() {
 	fi
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
-# List command
-# ──────────────────────────────────────────────────────────────────────────────
-list_services() {
+# ── List command ──────────────────────────────────────────────────────────────
+list() {
 	log "Discovered services:"
 	local services=()
 	mapfile -t services < <(get_services)
@@ -206,9 +228,7 @@ list_services() {
 	fi
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Core commands
-# ──────────────────────────────────────────────────────────────────────────────
+# ── Core commands ───────────────────────────────────────────────────────────────────
 create_network() {
 	log "Ensuring Docker network 'services' exists"
 	if $dry_run; then
@@ -275,46 +295,8 @@ restart() {
 	start "$@"
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Disable / Enable commands
-# ──────────────────────────────────────────────────────────────────────────────
-disable_services() {
-	if [ $# -eq 0 ]; then
-		error "Usage: mcli disable <service1> [service2 ...]"
-		return 1
-	fi
-	local all_services=()
-	mapfile -t all_services < <(get_services)
-	local invalid=false
-	for arg in "$@"; do
-		local matched=false
-		for svc in "${all_services[@]}"; do
-			[[ "$svc" == "$arg" ]] && matched=true && break
-		done
-		if ! $matched; then
-			error "Unknown service: ${CYAN}${arg}${RESET}"
-			invalid=true
-		fi
-	done
-	$invalid && return 1
-
-	local cf
-	cf=$(config_file)
-	mkdir -p "$(dirname "$cf")"
-	touch "$cf"
-	for arg in "$@"; do
-		local entry
-		entry="$(pwd)/$arg"
-		if grep -qxF "$entry" "$cf"; then
-			info "${CYAN}${arg}${RESET} is already disabled"
-		else
-			echo "$entry" >>"$cf"
-			info "${CYAN}${arg}${RESET} disabled"
-		fi
-	done
-}
-
-enable_services() {
+# ── Disable / Enable commands ──────────────────────────────────────────────────────
+enable() {
 	if [ $# -eq 0 ]; then
 		error "Usage: mcli enable <service1> [service2 ...]"
 		return 1
@@ -347,9 +329,45 @@ enable_services() {
 			if [ ! -s "$cf" ] || [ -z "$(tr -d '[:space:]' <"$cf")" ]; then
 				>"$cf"
 			fi
-			info "${CYAN}${arg}${RESET} enabled"
+			ok "${CYAN}${arg}${RESET} enabled"
 		else
-			info "${CYAN}${arg}${RESET} is already enabled"
+			ok "${CYAN}${arg}${RESET} is already enabled"
+		fi
+	done
+}
+
+disable() {
+	if [ $# -eq 0 ]; then
+		error "Usage: mcli disable <service1> [service2 ...]"
+		return 1
+	fi
+	local all_services=()
+	mapfile -t all_services < <(get_services)
+	local invalid=false
+	for arg in "$@"; do
+		local matched=false
+		for svc in "${all_services[@]}"; do
+			[[ "$svc" == "$arg" ]] && matched=true && break
+		done
+		if ! $matched; then
+			error "Unknown service: ${CYAN}${arg}${RESET}"
+			invalid=true
+		fi
+	done
+	$invalid && return 1
+
+	local cf
+	cf=$(config_file)
+	mkdir -p "$(dirname "$cf")"
+	touch "$cf"
+	for arg in "$@"; do
+		local entry
+		entry="$(pwd)/$arg"
+		if grep -qxF "$entry" "$cf"; then
+			ok "${CYAN}${arg}${RESET} is already disabled"
+		else
+			echo "$entry" >>"$cf"
+			ok "${CYAN}${arg}${RESET} disabled"
 		fi
 	done
 }
@@ -379,23 +397,26 @@ pull() {
 	fi
 }
 
+# ── Update command ────────────────────────────────────────────────────────────
+INSTALLER_SELF_URL="https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/install.sh"
 update() {
 	if $dry_run; then
-		dry_run_log "sh -c \"\$(curl -fsSL https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/install.sh)\""
+		dry_run_log "sh -c \"\$(curl -fsSL \"${INSTALLER_SELF_URL}\")\""
+		return
+	fi
+	if command -v curl >/dev/null 2>&1; then
+		sh -c "$(curl -fsSL "${INSTALLER_SELF_URL}")" -- --yes
+	elif command -v wget >/dev/null 2>&1; then
+		sh -c "$(wget -qO- "${INSTALLER_SELF_URL}")" -- --yes
 	else
-		sh -c "$(curl -fsSL https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/install.sh)"
+		error "Neither curl nor wget found. Please install one and try again."
+		exit 1
 	fi
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Main dispatch
-# ──────────────────────────────────────────────────────────────────────────────
-if [ $# -lt 1 ]; then
-	usage
-fi
-
-COMMAND=$1
-shift
+# ── Main dispatch ─────────────────────────────────────────────────────────────────
+COMMAND="${1:-}"
+[ $# -ge 1 ] && shift
 
 # parse options, collect service names after options
 service_args=()
@@ -421,19 +442,19 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "${COMMAND}" in
-list) list_services ;;
+list) list ;;
 create-network) create_network ;;
 start) start "${service_args[@]}" ;;
 stop) stop "${service_args[@]}" ;;
 restart) restart "${service_args[@]}" ;;
 pull) pull "${service_args[@]}" ;;
-disable) disable_services "${service_args[@]}" ;;
-enable) enable_services "${service_args[@]}" ;;
+enable) enable "${service_args[@]}" ;;
+disable) disable "${service_args[@]}" ;;
 update) update ;;
 version | --version | -v) echo "$VERSION" ;;
-help | --help | -h) usage ;;
+help | --help | -h) help ;;
 *)
 	error "Unknown command: ${COMMAND}"
-	usage
+	help
 	;;
 esac
