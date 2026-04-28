@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.3.1"
+VERSION="0.3.2"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -401,13 +401,13 @@ pull() {
 INSTALLER_SELF_URL="https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/install.sh"
 update() {
 	if $dry_run; then
-		dry_run_log "sh -c \"\$(curl -fsSL \"${INSTALLER_SELF_URL}\")\""
+		dry_run_log "bash -c \"\$(curl -fsSL \"${INSTALLER_SELF_URL}\")\""
 		return
 	fi
 	if command -v curl >/dev/null 2>&1; then
-		sh -c "$(curl -fsSL "${INSTALLER_SELF_URL}")" -- --yes
+		bash -c "$(curl -fsSL "${INSTALLER_SELF_URL}")" -- --yes
 	elif command -v wget >/dev/null 2>&1; then
-		sh -c "$(wget -qO- "${INSTALLER_SELF_URL}")" -- --yes
+		bash -c "$(wget -qO- "${INSTALLER_SELF_URL}")" -- --yes
 	else
 		error "Neither curl nor wget found. Please install one and try again."
 		exit 1
