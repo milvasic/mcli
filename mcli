@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.3.2"
+VERSION="0.4.0"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -20,6 +20,7 @@ Commands:
   stop [services..]         # Stop all or specified services (skips disabled)
   restart [services..]      # Restart all or specified services (skips disabled)
   pull [services..]         # Pull latest images for all or specified services (skips disabled)
+  backup <service>          # Back up a service directory to .bkp/<service>/<date>[.<counter>]
   disable <services..>      # Disable one or more services (excluded from start/stop/restart/pull)
   enable <services..>       # Re-enable one or more previously disabled services
   update                    # Update mcli to the latest version
@@ -28,7 +29,7 @@ Commands:
 
 Options:
   --dry-run                 # Print commands that would be executed, but do not run them
-                            #   (applicable to: create-network, start, stop, restart, pull, update)
+                            #   (applicable to: create-network, start, stop, restart, pull, backup, update)
                             #   (can appear anywhere after the command)
   --all                     # Include disabled services in start/stop/restart/pull
                             #   (applicable to: start, stop, restart, pull)
@@ -76,7 +77,7 @@ ok() { printf "${GREEN}%s${RESET}\n" "$1"; }
 colorize_line() {
 	sed \
 		-e "s/\\(^\\|[^[:alnum:]_'-]\\)\\(mcli\\)\\([^[:alnum:]_'-]\\|$\\)/\\1${GREEN}\\2${RESET}\\3/g" \
-		-e "s/\\(^\\|[^[:alnum:]_'-]\\)\\(list\\|create-network\\|start\\|stop\\|restart\\|pull\\|enable\\|disable\\|update\\|version\\|help\\)\\([^[:alnum:]_'-]\\|$\\)/\\1${YELLOW}\\2${RESET}\\3/g" \
+		-e "s/\\(^\\|[^[:alnum:]_'-]\\)\\(list\\|create-network\\|start\\|stop\\|restart\\|pull\\|backup\\|enable\\|disable\\|update\\|version\\|help\\)\\([^[:alnum:]_'-]\\|$\\)/\\1${YELLOW}\\2${RESET}\\3/g" \
 		-e "s/--[a-z][a-z-]*/${CYAN}&${RESET}/g" \
 		-e "s/\([ ,]\)\(-[a-z]\)/\\1${CYAN}\\2${RESET}/g"
 }
@@ -397,6 +398,52 @@ pull() {
 	fi
 }
 
+# ── Backup command ────────────────────────────────────────────────────────────
+backup() {
+	if [ $# -ne 1 ]; then
+		error "Usage: mcli backup <service>"
+		return 1
+	fi
+	local service="$1"
+
+	local all_services=()
+	mapfile -t all_services < <(get_services)
+	local matched=false
+	for svc in "${all_services[@]}"; do
+		[[ "$svc" == "$service" ]] && matched=true && break
+	done
+	if ! $matched; then
+		error "Unknown service: ${CYAN}${service}${RESET}"
+		return 1
+	fi
+
+	local today
+	today=$(date +%Y-%m-%d)
+	local bkp_dir=".bkp/${service}"
+	local dest="${bkp_dir}/${today}"
+
+	if [ -d "$dest" ]; then
+		local counter=1
+		while [ -d "${dest}.${counter}" ]; do
+			((counter++))
+		done
+		dest="${dest}.${counter}"
+	fi
+
+	log "Backing up ${CYAN}${service}${RESET} to ${dest}"
+	local cmd="sudo cp -r \"${service}\" \"${dest}\""
+	if $dry_run; then
+		dry_run_log "mkdir -p \"${bkp_dir}\" && ${cmd}"
+	else
+		mkdir -p "$bkp_dir"
+		if ! eval "$cmd"; then
+			error "Backup of ${CYAN}${service}${RESET} failed"
+			return 1
+		fi
+		ok "Backup created: ${dest}"
+	fi
+}
+
 # ── Update command ────────────────────────────────────────────────────────────
 INSTALLER_SELF_URL="https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/install.sh"
 update() {
@@ -450,6 +497,7 @@ start) start "${service_args[@]}" ;;
 stop) stop "${service_args[@]}" ;;
 restart) restart "${service_args[@]}" ;;
 pull) pull "${service_args[@]}" ;;
+backup) backup "${service_args[@]}" ;;
 enable) enable "${service_args[@]}" ;;
 disable) disable "${service_args[@]}" ;;
 update) update ;;
