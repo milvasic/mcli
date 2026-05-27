@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.4.1"
+VERSION="0.5.0"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -21,6 +21,7 @@ Commands:
   restart [services..]      # Restart all or specified services (skips disabled)
   pull [services..]         # Pull latest images for all or specified services (skips disabled)
   backup <service>          # Back up a service directory to .bkp/<service>/<date>[.<counter>]
+  backup size               # Show disk space used by backups
   disable <services..>      # Disable one or more services (excluded from start/stop/restart/pull)
   enable <services..>       # Re-enable one or more previously disabled services
   update                    # Update mcli to the latest version
