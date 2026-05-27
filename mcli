@@ -418,6 +418,8 @@ backup_size() {
 	fi
 	log "Backup disk usage"
 	local found=false
+	local max_width=5  # at least len("total")
+	local -a names sizes
 	shopt -s nullglob
 	for svc_dir in "$bkp_root"/*/; do
 		found=true
@@ -425,21 +427,27 @@ backup_size() {
 		size=$(du -sh "$svc_dir" 2>/dev/null | cut -f1)
 		name="${svc_dir#"$bkp_root"/}"
 		name="${name%/}"
-		printf "  ${CYAN}%s${RESET}  %s\n" "$name" "$size"
+		names+=("$name")
+		sizes+=("$size")
+		(( ${#name} > max_width )) && max_width=${#name}
 	done
 	shopt -u nullglob
 	if ! $found; then
 		ok "No backups found"
 		return 0
 	fi
+	local i
+	for i in "${!names[@]}"; do
+		printf "  ${CYAN}%-*s${RESET}  %s\n" "$max_width" "${names[$i]}" "${sizes[$i]}"
+	done
 	local total
 	total=$(du -sh "$bkp_root" 2>/dev/null | cut -f1)
-	printf "  ---\n"
-	printf "  ${BOLD}total${RESET}  %s\n" "$total"
+	printf "  %s\n" "$(printf '%*s' "$((max_width + 2))" '' | tr ' ' '-')"
+	printf "  ${BOLD}%-*s${RESET}  %s\n" "$max_width" "total" "$total"
 }
 
 backup() {
-	if [ $# -eq 1 ] && [ "$1" = "size" ]; then
+	if [ $# -eq 1 ] && [ "$1" = "size" ] && ! is_known_service "size"; then
 		backup_size
 		return 0
 	fi
