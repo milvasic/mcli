@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.4.0"
+VERSION="0.4.1"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -426,22 +426,35 @@ backup() {
 	local bkp_dir=".bkp/${service}"
 	local dest="${bkp_dir}/${today}"
 
-	if [ -d "$dest" ]; then
-		local counter=1
-		while [ -d "${dest}.${counter}" ]; do
-			((counter++))
-		done
-		dest="${dest}.${counter}"
-	fi
-
-	log "Backing up ${CYAN}${service}${RESET} to ${dest}"
-	local cmd="sudo cp -r \"${service}\" \"${dest}\""
 	if $dry_run; then
-		dry_run_log "mkdir -p \"${bkp_dir}\" && ${cmd}"
+		if [ -d "$dest" ]; then
+			local counter=1
+			while [ -d "${dest}.${counter}" ]; do
+				((counter++))
+			done
+			dest="${dest}.${counter}"
+		fi
+		log "Backing up ${CYAN}${service}${RESET} to ${dest}"
+		dry_run_log "mkdir -p \"${bkp_dir}\" && mkdir \"${dest}\" && sudo cp -r \"${service}/.\" \"${dest}\""
 	else
 		mkdir -p "$bkp_dir"
-		if ! eval "$cmd"; then
+		# Atomically claim the destination; retry with incrementing counter on collision
+		local max_attempts=100
+		local counter=1
+		if ! mkdir "$dest" 2>/dev/null; then
+			while ! mkdir "${dest}.${counter}" 2>/dev/null; do
+				((counter++))
+				if [ "$counter" -ge "$max_attempts" ]; then
+					error "Could not claim a backup slot after ${max_attempts} attempts"
+					return 1
+				fi
+			done
+			dest="${dest}.${counter}"
+		fi
+		log "Backing up ${CYAN}${service}${RESET} to ${dest}"
+		if ! sudo cp -r "${service}/." "${dest}"; then
 			error "Backup of ${CYAN}${service}${RESET} failed"
+			rmdir "$dest" 2>/dev/null
 			return 1
 		fi
 		ok "Backup created: ${dest}"
