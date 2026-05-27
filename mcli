@@ -398,6 +398,16 @@ pull() {
 	fi
 }
 
+# Returns 0 if name matches a registered service directory, 1 otherwise.
+# Distinct from filter_services: does not exclude disabled services.
+is_known_service() {
+	local name="$1" svc
+	while IFS= read -r svc; do
+		[[ "$svc" == "$name" ]] && return 0
+	done < <(get_services)
+	return 1
+}
+
 # ── Backup command ────────────────────────────────────────────────────────────
 backup() {
 	if [ $# -ne 1 ]; then
@@ -406,13 +416,7 @@ backup() {
 	fi
 	local service="$1"
 
-	local all_services=()
-	mapfile -t all_services < <(get_services)
-	local matched=false
-	for svc in "${all_services[@]}"; do
-		[[ "$svc" == "$service" ]] && matched=true && break
-	done
-	if ! $matched; then
+	if ! is_known_service "$service"; then
 		error "Unknown service: ${CYAN}${service}${RESET}"
 		return 1
 	fi
