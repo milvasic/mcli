@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.4.1"
+VERSION="0.5.0"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -21,6 +21,7 @@ Commands:
   restart [services..]      # Restart all or specified services (skips disabled)
   pull [services..]         # Pull latest images for all or specified services (skips disabled)
   backup <service>          # Back up a service directory to .bkp/<service>/<date>[.<counter>]
+  backup usage              # Show backup-specific usage details (folder naming, sudo requirement)
   disable <services..>      # Disable one or more services (excluded from start/stop/restart/pull)
   enable <services..>       # Re-enable one or more previously disabled services
   update                    # Update mcli to the latest version
@@ -409,7 +410,38 @@ is_known_service() {
 }
 
 # ── Backup command ────────────────────────────────────────────────────────────
+backup_usage() {
+	colorize >&2 <<'EOF'
+mcli backup — Back up a service directory
+
+Usage:
+  mcli backup <service> [--dry-run]  # Perform a backup
+  mcli backup usage                  # Show this help
+  mcli backup --usage                # Show this help
+
+Folder naming:
+  Backups are created under .bkp/<service>/ in the current directory.
+  The destination folder is named after today's date (YYYY-MM-DD).
+  If a folder for today already exists, a numeric counter is appended:
+    .bkp/<service>/2025-01-15
+    .bkp/<service>/2025-01-15.1
+    .bkp/<service>/2025-01-15.2
+    ...
+
+Sudo:
+  The copy is performed with sudo to preserve file ownership and permissions.
+  Ensure the running user has sudo access before invoking backup.
+
+Options:
+  --dry-run    # Print the commands that would be executed without running them
+EOF
+}
+
 backup() {
+	if [ $# -eq 1 ] && [ "$1" = "usage" ]; then
+		backup_usage
+		return 0
+	fi
 	if [ $# -ne 1 ]; then
 		error "Usage: mcli backup <service>"
 		return 1
@@ -486,6 +518,7 @@ COMMAND="${1:-}"
 service_args=()
 dry_run=false
 include_all=false
+show_usage=false
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--dry-run)
@@ -494,6 +527,10 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--all)
 		include_all=true
+		shift
+		;;
+	--usage)
+		show_usage=true
 		shift
 		;;
 	-*)
@@ -514,7 +551,13 @@ start) start "${service_args[@]}" ;;
 stop) stop "${service_args[@]}" ;;
 restart) restart "${service_args[@]}" ;;
 pull) pull "${service_args[@]}" ;;
-backup) backup "${service_args[@]}" ;;
+backup)
+	if $show_usage; then
+		backup_usage
+	else
+		backup "${service_args[@]}"
+	fi
+	;;
 enable) enable "${service_args[@]}" ;;
 disable) disable "${service_args[@]}" ;;
 update) update ;;

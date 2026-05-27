@@ -45,6 +45,7 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | `restart [services..]`       | Restart all or specified services (skips disabled)                   |
 | `pull [services..]`          | Pull latest images, skipping buildable services (skips disabled)     |
 | `backup <service>`           | Back up a service directory to `.bkp/<service>/<date>[.<counter>]`  |
+| `backup usage`               | Show backup-specific usage (folder naming, counter, sudo requirement) |
 | `disable <services..>`       | Disable one or more services (excluded from start/stop/restart/pull) |
 | `enable <services..>`        | Re-enable one or more previously disabled services                   |
 | `update`                     | Update mcli to the latest version                                    |
@@ -89,6 +90,10 @@ mcli start --all
 
 # Back up a service (copies to .bkp/my-service/2026-05-26)
 mcli backup my-service
+
+# Show backup usage details (folder naming, counter behaviour, sudo requirement)
+mcli backup usage
+mcli backup --usage
 ```
 
 ## Service Discovery
