@@ -424,12 +424,12 @@ backup_size() {
 	for svc_dir in "$bkp_root"/*/; do
 		found=true
 		local size name
-		size=$(du -sh "$svc_dir" 2>/dev/null | cut -f1)
+		size=$(du -sh "$svc_dir" 2>/dev/null | cut -f1) || true
 		name="${svc_dir#"$bkp_root"/}"
 		name="${name%/}"
 		names+=("$name")
 		sizes+=("$size")
-		(( ${#name} > max_width )) && max_width=${#name}
+		if (( ${#name} > max_width )); then max_width=${#name}; fi
 	done
 	shopt -u nullglob
 	if ! $found; then
@@ -441,7 +441,7 @@ backup_size() {
 		printf "  ${CYAN}%-*s${RESET}  %s\n" "$max_width" "${names[$i]}" "${sizes[$i]}"
 	done
 	local total
-	total=$(du -sh "$bkp_root" 2>/dev/null | cut -f1)
+	total=$(du -sh "$bkp_root" 2>/dev/null | cut -f1) || true
 	printf "  %s\n" "$(printf '%*s' "$((max_width + 2))" '' | tr ' ' '-')"
 	printf "  ${BOLD}%-*s${RESET}  %s\n" "$max_width" "total" "$total"
 }
