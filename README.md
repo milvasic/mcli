@@ -113,6 +113,12 @@ All services share a Docker bridge network named `services`. Use `mcli create-ne
 
 Disabled services are stored in `${XDG_CONFIG_HOME:-~/.config}/mcli/disabled`. Each entry is a full path to the service directory, scoped by the working directory from which `mcli disable` was run. This means different service directories maintain independent disabled lists.
 
+## Changelog
+
+### 0.5.1
+
+- Fixed `backup size` silently producing no output when backup directories contain root-owned subdirectories (set -e interaction with `du`)
+
 ## Contributing
 
 Issues and pull requests are welcome. Please keep changes minimal and focused.
