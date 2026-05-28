@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.5.1"
+VERSION="0.6.0"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -20,7 +20,8 @@ Commands:
   stop [services..]         # Stop all or specified services (skips disabled)
   restart [services..]      # Restart all or specified services (skips disabled)
   pull [services..]         # Pull latest images for all or specified services (skips disabled)
-  backup <service>          # Back up a service directory to .bkp/<service>/<date>[.<counter>]
+  backup <service>          # Stop service, back up to .bkp/<service>/<date>[.<counter>], restart service
+  backup <service> --live   # Back up without stopping (live backup)
   backup size               # Show disk space used by backups
   disable <services..>      # Disable one or more services (excluded from start/stop/restart/pull)
   enable <services..>       # Re-enable one or more previously disabled services
@@ -34,6 +35,9 @@ Options:
                             #   (can appear anywhere after the command)
   --all                     # Include disabled services in start/stop/restart/pull
                             #   (applicable to: start, stop, restart, pull)
+                            #   (can appear anywhere after the command)
+  --live                    # Skip stop/start around backup; back up while the service is running
+                            #   (applicable to: backup)
                             #   (can appear anywhere after the command)
 
 Service discovery:
@@ -452,7 +456,7 @@ backup() {
 		return 0
 	fi
 	if [ $# -ne 1 ]; then
-		error "Usage: mcli backup <service>"
+		error "Usage: mcli backup <service> [--live]"
 		return 1
 	fi
 	local service="$1"
@@ -466,6 +470,21 @@ backup() {
 	today=$(date +%Y-%m-%d)
 	local bkp_dir=".bkp/${service}"
 	local dest="${bkp_dir}/${today}"
+
+	# Stop service before backup unless --live is set
+	if ! $live; then
+		log "Stopping ${CYAN}${service}${RESET} before backup"
+		local stop_cmd
+		stop_cmd="docker compose --project-directory \"$service\" down --remove-orphans"
+		if $dry_run; then
+			dry_run_log "$stop_cmd"
+		else
+			if ! eval "$stop_cmd"; then
+				error "Failed to stop ${CYAN}${service}${RESET} before backup"
+				return 1
+			fi
+		fi
+	fi
 
 	if $dry_run; then
 		if [ -d "$dest" ]; then
@@ -487,6 +506,10 @@ backup() {
 				((counter++))
 				if [ "$counter" -ge "$max_attempts" ]; then
 					error "Could not claim a backup slot after ${max_attempts} attempts"
+					if ! $live; then
+						log "Restarting ${CYAN}${service}${RESET} after failed backup"
+						docker compose --project-directory "$service" up -d || true
+					fi
 					return 1
 				fi
 			done
@@ -496,9 +519,28 @@ backup() {
 		if ! sudo cp -r "${service}/." "${dest}"; then
 			error "Backup of ${CYAN}${service}${RESET} failed"
 			rmdir "$dest" 2>/dev/null
+			if ! $live; then
+				log "Restarting ${CYAN}${service}${RESET} after failed backup"
+				docker compose --project-directory "$service" up -d || true
+			fi
 			return 1
 		fi
 		ok "Backup created: ${dest}"
+	fi
+
+	# Restart service after backup unless --live is set
+	if ! $live; then
+		log "Restarting ${CYAN}${service}${RESET} after backup"
+		local start_cmd
+		start_cmd="docker compose --project-directory \"$service\" up -d"
+		if $dry_run; then
+			dry_run_log "$start_cmd"
+		else
+			if ! eval "$start_cmd"; then
+				error "Failed to restart ${CYAN}${service}${RESET} after backup"
+				return 1
+			fi
+		fi
 	fi
 }
 
@@ -527,6 +569,7 @@ COMMAND="${1:-}"
 service_args=()
 dry_run=false
 include_all=false
+live=false
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--dry-run)
@@ -535,6 +578,10 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--all)
 		include_all=true
+		shift
+		;;
+	--live)
+		live=true
 		shift
 		;;
 	-*)

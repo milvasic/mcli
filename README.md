@@ -44,7 +44,8 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | `stop [services..]`          | Stop all or specified services, removing orphans (skips disabled)    |
 | `restart [services..]`       | Restart all or specified services (skips disabled)                   |
 | `pull [services..]`          | Pull latest images, skipping buildable services (skips disabled)     |
-| `backup <service>`           | Back up a service directory to `.bkp/<service>/<date>[.<counter>]`  |
+| `backup <service>`           | Stop service, back up to `.bkp/<service>/<date>[.<counter>]`, restart service |
+| `backup <service> --live`    | Back up without stopping (live backup)                               |
 | `backup size`                | Show disk space used by all backups under `.bkp/`                   |
 | `disable <services..>`       | Disable one or more services (excluded from start/stop/restart/pull) |
 | `enable <services..>`        | Re-enable one or more previously disabled services                   |
@@ -58,8 +59,9 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--dry-run` | Print the commands that would be executed without running them (applies to: `create-network`, `start`, `stop`, `restart`, `pull`, `backup`, `update`) |
 | `--all`     | Include disabled services in start/stop/restart/pull (applies to: `start`, `stop`, `restart`, `pull`)                                       |
+| `--live`    | Skip stop/start around backup; back up while the service is running (applies to: `backup`)                                                   |
 
-`--dry-run` and `--all` can appear anywhere after the command.
+`--dry-run`, `--all`, and `--live` can appear anywhere after the command.
 
 ### Examples
 
@@ -88,8 +90,11 @@ mcli enable my-service
 # Start all services including disabled ones
 mcli start --all
 
-# Back up a service (copies to .bkp/my-service/2026-05-26)
+# Back up a service (stops it first, copies to .bkp/my-service/2026-05-26, restarts it)
 mcli backup my-service
+
+# Back up without stopping the service
+mcli backup my-service --live
 
 # Show disk space used by all backups
 mcli backup size
@@ -114,6 +119,11 @@ All services share a Docker bridge network named `services`. Use `mcli create-ne
 Disabled services are stored in `${XDG_CONFIG_HOME:-~/.config}/mcli/disabled`. Each entry is a full path to the service directory, scoped by the working directory from which `mcli disable` was run. This means different service directories maintain independent disabled lists.
 
 ## Changelog
+
+### 0.6.0
+
+- `mcli backup <service>` now stops the service before copying and restarts it afterwards to prevent data inconsistencies during backup
+- Added `--live` flag to `backup` to preserve the old behaviour (back up without stopping the service)
 
 ### 0.5.1
 
