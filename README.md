@@ -44,7 +44,7 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | `stop [services..]`          | Stop all or specified services, removing orphans (skips disabled)    |
 | `restart [services..]`       | Restart all or specified services (skips disabled)                   |
 | `pull [services..]`          | Pull latest images, skipping buildable services (skips disabled)     |
-| `backup <service>`           | Stop service, back up to `.bkp/<service>/<date>[.<counter>].tar.gz`, restart service |
+| `backup <service>`           | Stop service, back up to `.bkp/<service>/<date>[.<counter>].tar.gz`, restart service. Archive includes `image.txt` with container image digests. |
 | `backup <service> --live`    | Back up without stopping (live backup)                               |
 | `backup size`                | Show disk space used by all backups under `.bkp/`                   |
 | `disable <services..>`       | Disable one or more services (excluded from start/stop/restart/pull) |
@@ -119,6 +119,10 @@ All services share a Docker bridge network named `services`. Use `mcli create-ne
 Disabled services are stored in `${XDG_CONFIG_HOME:-~/.config}/mcli/disabled`. Each entry is a full path to the service directory, scoped by the working directory from which `mcli disable` was run. This means different service directories maintain independent disabled lists.
 
 ## Changelog
+
+### 0.8.0
+
+- `mcli backup <service>` now embeds `image.txt` inside the archive with `<image>:<tag>@sha256:<digest>` for each container (falls back to compose file image references when the service is not running)
 
 ### 0.7.0
 

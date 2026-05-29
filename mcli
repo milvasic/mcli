@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.7.0"
+VERSION="0.8.0"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -21,6 +21,7 @@ Commands:
   restart [services..]      # Restart all or specified services (skips disabled)
   pull [services..]         # Pull latest images for all or specified services (skips disabled)
   backup <service>          # Stop service, back up to .bkp/<service>/<date>[.<counter>].tar.gz, restart service
+                            #   Archive includes image.txt with container image digests
   backup <service> --live   # Back up without stopping (live backup)
   backup size               # Show disk space used by backups
   disable <services..>      # Disable one or more services (excluded from start/stop/restart/pull)
@@ -449,7 +450,9 @@ capture_image_info() {
 		if [[ -n "$compose_file" ]]; then
 			while IFS= read -r line; do
 				if [[ "$line" =~ ^[[:space:]]*image:[[:space:]]*(.+)[[:space:]]*$ ]]; then
-					lines+=("${BASH_REMATCH[1]}")
+					local raw_img="${BASH_REMATCH[1]}"
+					raw_img="${raw_img%"${raw_img##*[^[:space:]]}"}"
+					lines+=("$raw_img")
 				fi
 			done < "$compose_file"
 		fi
@@ -521,9 +524,12 @@ backup() {
 	log "Capturing image info for ${CYAN}${service}${RESET}"
 	local image_lines=()
 	if $dry_run; then
-		dry_run_log "docker compose --project-directory \"$service\" ps -q | xargs docker inspect --format '{{.Config.Image}}@{{.Image}}' (falls back to compose file if not running)"
+		dry_run_log "docker compose --project-directory \"$service\" ps -q → per-container docker inspect (Config.Image + RepoDigest) → image.txt"
 	else
 		mapfile -t image_lines < <(capture_image_info "$service")
+		if [[ ${#image_lines[@]} -eq 0 ]]; then
+			printf "${YELLOW}Warning:${RESET} no image info captured for ${CYAN}${service}${RESET} (image.txt will be empty)\n" >&2
+		fi
 	fi
 
 	# Stop service before backup unless --live is set
