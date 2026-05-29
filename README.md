@@ -44,7 +44,7 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | `stop [services..]`          | Stop all or specified services, removing orphans (skips disabled)    |
 | `restart [services..]`       | Restart all or specified services (skips disabled)                   |
 | `pull [services..]`          | Pull latest images, skipping buildable services (skips disabled)     |
-| `backup <service>`           | Stop service, back up to `.bkp/<service>/<date>[.<counter>].tar.gz`, restart service |
+| `backup <service>`           | Stop service, back up to `.bkp/<service>/<date>[.<counter>].tar.gz`, restart service. Archive includes `image.txt` with container image digests. |
 | `backup <service> --live`    | Back up without stopping (live backup)                               |
 | `backup size`                | Show disk space used by all backups under `.bkp/`                   |
 | `restore <service>`          | Restore service from a backup archive in `.bkp/<service>/`; interactive picker when multiple backups exist |
@@ -91,7 +91,7 @@ mcli enable my-service
 # Start all services including disabled ones
 mcli start --all
 
-# Back up a service (stops it first, copies to .bkp/my-service/2026-05-26.tar.gz, restarts it)
+# Back up a service (stops it first, archives to .bkp/my-service/2026-05-26.tar.gz, restarts it)
 mcli backup my-service
 
 # Back up without stopping the service
@@ -127,13 +127,22 @@ Disabled services are stored in `${XDG_CONFIG_HOME:-~/.config}/mcli/disabled`. E
 
 ## Changelog
 
-### 0.7.0
+### 0.9.0
 
 - Added `mcli restore <service>` command to recover a service from a `.tar.gz` backup archive
 - Restore flow: stop service → optional pre-restore snapshot → extract chosen archive → start service
 - Interactive numbered picker shown when more than one backup exists (including archives in `pre-restore/`)
 - Pre-restore backup written to `.bkp/<service>/pre-restore/<date>.tar.gz` (counter suffix on same-day collision)
 - Full `--dry-run` support: logs all steps without modifying anything
+
+### 0.8.0
+
+- `mcli backup <service>` now embeds `image.txt` inside the archive with `<image>:<tag>@sha256:<digest>` for each container (falls back to compose file image references when the service is not running)
+
+### 0.7.0
+
+- `mcli backup <service>` now creates a compressed `.tar.gz` archive instead of a plain directory copy, reducing backup disk footprint
+- Same-day backups for the same service are named `<date>.1.tar.gz`, `<date>.2.tar.gz`, etc.
 
 ### 0.6.0
 

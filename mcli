@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.7.0"
+VERSION="0.9.0"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -20,7 +20,8 @@ Commands:
   stop [services..]         # Stop all or specified services (skips disabled)
   restart [services..]      # Restart all or specified services (skips disabled)
   pull [services..]         # Pull latest images for all or specified services (skips disabled)
-  backup <service>          # Stop service, back up to .bkp/<service>/<date>[.<counter>], restart service
+  backup <service>          # Stop service, back up to .bkp/<service>/<date>[.<counter>].tar.gz, restart service
+                            #   Archive includes image.txt with container image digests
   backup <service> --live   # Back up without stopping (live backup)
   backup size               # Show disk space used by backups
   restore <service>         # Restore service from a backup archive in .bkp/<service>/
@@ -414,6 +415,53 @@ is_known_service() {
 	return 1
 }
 
+# ── Image capture ────────────────────────────────────────────────────────────
+# Writes <image-name>:<tag>@sha256:<digest> lines for each container.
+# Falls back to compose file image references if no containers are running.
+capture_image_info() {
+	local service="$1"
+	local lines=()
+
+	local container_ids
+	container_ids=$(docker compose --project-directory "$service" ps -q 2>/dev/null) || true
+
+	if [[ -n "$container_ids" ]]; then
+		while IFS= read -r cid; do
+			[[ -z "$cid" ]] && continue
+			local img_ref img_id repo_digest digest
+			img_ref=$(docker inspect --format '{{.Config.Image}}' "$cid" 2>/dev/null) || continue
+			img_id=$(docker inspect --format '{{.Image}}' "$cid" 2>/dev/null) || continue
+			repo_digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$img_id" 2>/dev/null) || true
+			if [[ -n "$repo_digest" ]]; then
+				digest="${repo_digest#*@}"
+			else
+				digest="$img_id"
+			fi
+			lines+=("${img_ref}@${digest}")
+		done <<< "$container_ids"
+	fi
+
+	if [[ ${#lines[@]} -eq 0 ]]; then
+		local compose_file=""
+		if [[ -f "$service/docker-compose.yml" ]]; then
+			compose_file="$service/docker-compose.yml"
+		elif [[ -f "$service/docker-compose.yaml" ]]; then
+			compose_file="$service/docker-compose.yaml"
+		fi
+		if [[ -n "$compose_file" ]]; then
+			while IFS= read -r line; do
+				if [[ "$line" =~ ^[[:space:]]*image:[[:space:]]*(.+)[[:space:]]*$ ]]; then
+					local raw_img="${BASH_REMATCH[1]}"
+					raw_img="${raw_img%"${raw_img##*[^[:space:]]}"}"
+					lines+=("$raw_img")
+				fi
+			done < "$compose_file"
+		fi
+	fi
+
+	[[ ${#lines[@]} -gt 0 ]] && printf '%s\n' "${lines[@]}"
+}
+
 # ── Backup command ────────────────────────────────────────────────────────────
 backup_size() {
 	local bkp_root=".bkp"
@@ -470,7 +518,20 @@ backup() {
 	local today
 	today=$(date +%Y-%m-%d)
 	local bkp_dir=".bkp/${service}"
-	local dest="${bkp_dir}/${today}"
+	local base="${bkp_dir}/${today}"
+	local dest="${base}.tar.gz"
+
+	# Capture image info before stopping (non-live) or from running containers (live)
+	log "Capturing image info for ${CYAN}${service}${RESET}"
+	local image_lines=()
+	if $dry_run; then
+		dry_run_log "docker compose --project-directory \"$service\" ps -q → per-container docker inspect (Config.Image + RepoDigest) → image.txt"
+	else
+		mapfile -t image_lines < <(capture_image_info "$service")
+		if [[ ${#image_lines[@]} -eq 0 ]]; then
+			printf "${YELLOW}Warning:${RESET} no image info captured for ${CYAN}${service}${RESET} (image.txt will be empty)\n" >&2
+		fi
+	fi
 
 	# Stop service before backup unless --live is set
 	if ! $live; then
@@ -487,23 +548,27 @@ backup() {
 		fi
 	fi
 
+	local max_attempts=100
 	if $dry_run; then
-		if [ -d "$dest" ]; then
+		if [ -f "$dest" ]; then
 			local counter=1
-			while [ -d "${dest}.${counter}" ]; do
+			while [ -f "${base}.${counter}.tar.gz" ]; do
 				((counter++))
+				if [ "$counter" -ge "$max_attempts" ]; then
+					error "Could not claim a backup slot after ${max_attempts} attempts"
+					return 1
+				fi
 			done
-			dest="${dest}.${counter}"
+			dest="${base}.${counter}.tar.gz"
 		fi
 		log "Backing up ${CYAN}${service}${RESET} to ${dest}"
-		dry_run_log "mkdir -p \"${bkp_dir}\" && mkdir \"${dest}\" && sudo cp -r \"${service}/.\" \"${dest}\""
+		dry_run_log "mkdir -p \"${bkp_dir}\" && sudo tar czf \"${dest}\" -C \"${service}\" . -C \"\$(mktemp -d)\" image.txt"
 	else
 		mkdir -p "$bkp_dir"
-		# Atomically claim the destination; retry with incrementing counter on collision
-		local max_attempts=100
+		# Atomically claim the destination using noclobber; retry with incrementing counter on collision
 		local counter=1
-		if ! mkdir "$dest" 2>/dev/null; then
-			while ! mkdir "${dest}.${counter}" 2>/dev/null; do
+		if ! ( set -C; : > "$dest" ) 2>/dev/null; then
+			while ! ( set -C; : > "${base}.${counter}.tar.gz" ) 2>/dev/null; do
 				((counter++))
 				if [ "$counter" -ge "$max_attempts" ]; then
 					error "Could not claim a backup slot after ${max_attempts} attempts"
@@ -514,18 +579,30 @@ backup() {
 					return 1
 				fi
 			done
-			dest="${dest}.${counter}"
+			dest="${base}.${counter}.tar.gz"
 		fi
 		log "Backing up ${CYAN}${service}${RESET} to ${dest}"
-		if ! sudo cp -r "${service}/." "${dest}"; then
+		local tmp_dir
+		tmp_dir=$(mktemp -d)
+		if [[ ${#image_lines[@]} -gt 0 ]]; then
+			printf '%s\n' "${image_lines[@]}" > "$tmp_dir/image.txt"
+		else
+			> "$tmp_dir/image.txt"
+		fi
+		trap 'rm -f "$dest"; rm -rf "$tmp_dir"' INT TERM EXIT
+		if ! sudo tar czf "${dest}" -C "${service}" . -C "$tmp_dir" image.txt; then
+			trap - INT TERM EXIT
 			error "Backup of ${CYAN}${service}${RESET} failed"
-			rmdir "$dest" 2>/dev/null
+			rm -f "$dest"
+			rm -rf "$tmp_dir"
 			if ! $live; then
 				log "Restarting ${CYAN}${service}${RESET} after failed backup"
 				docker compose --project-directory "$service" up -d || true
 			fi
 			return 1
 		fi
+		rm -rf "$tmp_dir"
+		trap - INT TERM EXIT
 		ok "Backup created: ${dest}"
 	fi
 
