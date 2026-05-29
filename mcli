@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.6.0"
+VERSION="0.7.0"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -560,10 +560,10 @@ restore() {
 
 	local bkp_dir=".bkp/${service}"
 
-	# Collect available backups (tar.gz in bkp_dir/, excluding pre-restore/ subdir)
+	# Collect all available backups (top-level + pre-restore/), sorted by name
 	local backups=()
 	shopt -s nullglob
-	for f in "${bkp_dir}"/*.tar.gz; do
+	for f in "${bkp_dir}"/*.tar.gz "${bkp_dir}"/pre-restore/*.tar.gz; do
 		backups+=("$f")
 	done
 	shopt -u nullglob
@@ -607,9 +607,23 @@ restore() {
 		log "Restoring ${CYAN}${service}${RESET} from $(basename "$chosen")"
 	fi
 
-	# Pre-restore backup prompt
+	# Stop service first (ensures a clean snapshot if user requests pre-restore backup)
+	log "Stopping ${CYAN}${service}${RESET} before restore"
+	local stop_cmd
+	stop_cmd="docker compose --project-directory \"$service\" down --remove-orphans"
+	if $dry_run; then
+		dry_run_log "$stop_cmd"
+	else
+		if ! eval "$stop_cmd"; then
+			error "Failed to stop ${CYAN}${service}${RESET} before restore"
+			return 1
+		fi
+	fi
+
+	# Pre-restore backup prompt (after stop, so the archive captures a clean state)
 	if $dry_run; then
 		dry_run_log "Prompt: 'Back up current version before restoring? [y/N]'"
+		dry_run_log "sudo tar czf \"${bkp_dir}/pre-restore/<date>.tar.gz\" -C \"${service}\" ."
 	else
 		local pre_restore_ans
 		printf "Back up current version before restoring? [y/N] " >&2
@@ -633,19 +647,6 @@ restore() {
 				return 1
 			fi
 			ok "Pre-restore backup: ${pre_restore_dest}"
-		fi
-	fi
-
-	# Stop service
-	log "Stopping ${CYAN}${service}${RESET} before restore"
-	local stop_cmd
-	stop_cmd="docker compose --project-directory \"$service\" down --remove-orphans"
-	if $dry_run; then
-		dry_run_log "$stop_cmd"
-	else
-		if ! eval "$stop_cmd"; then
-			error "Failed to stop ${CYAN}${service}${RESET} before restore"
-			return 1
 		fi
 	fi
 
