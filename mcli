@@ -487,11 +487,16 @@ backup() {
 		fi
 	fi
 
+	local max_attempts=100
 	if $dry_run; then
 		if [ -f "$dest" ]; then
 			local counter=1
 			while [ -f "${base}.${counter}.tar.gz" ]; do
 				((counter++))
+				if [ "$counter" -ge "$max_attempts" ]; then
+					error "Could not claim a backup slot after ${max_attempts} attempts"
+					return 1
+				fi
 			done
 			dest="${base}.${counter}.tar.gz"
 		fi
@@ -500,7 +505,6 @@ backup() {
 	else
 		mkdir -p "$bkp_dir"
 		# Atomically claim the destination using noclobber; retry with incrementing counter on collision
-		local max_attempts=100
 		local counter=1
 		if ! ( set -C; : > "$dest" ) 2>/dev/null; then
 			while ! ( set -C; : > "${base}.${counter}.tar.gz" ) 2>/dev/null; do
@@ -517,7 +521,9 @@ backup() {
 			dest="${base}.${counter}.tar.gz"
 		fi
 		log "Backing up ${CYAN}${service}${RESET} to ${dest}"
+		trap 'rm -f "$dest"' INT TERM EXIT
 		if ! sudo tar czf "${dest}" -C "${service}" .; then
+			trap - INT TERM EXIT
 			error "Backup of ${CYAN}${service}${RESET} failed"
 			rm -f "$dest"
 			if ! $live; then
@@ -526,6 +532,7 @@ backup() {
 			fi
 			return 1
 		fi
+		trap - INT TERM EXIT
 		ok "Backup created: ${dest}"
 	fi
 
