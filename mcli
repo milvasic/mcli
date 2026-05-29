@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.8.0"
+VERSION="0.9.0"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -24,6 +24,7 @@ Commands:
                             #   Archive includes image.txt with container image digests
   backup <service> --live   # Back up without stopping (live backup)
   backup size               # Show disk space used by backups
+  restore <service>         # Restore service from a backup archive in .bkp/<service>/
   disable <services..>      # Disable one or more services (excluded from start/stop/restart/pull)
   enable <services..>       # Re-enable one or more previously disabled services
   update                    # Update mcli to the latest version
@@ -32,7 +33,7 @@ Commands:
 
 Options:
   --dry-run                 # Print commands that would be executed, but do not run them
-                            #   (applicable to: create-network, start, stop, restart, pull, backup, update)
+                            #   (applicable to: create-network, start, stop, restart, pull, backup, restore, update)
                             #   (can appear anywhere after the command)
   --all                     # Include disabled services in start/stop/restart/pull
                             #   (applicable to: start, stop, restart, pull)
@@ -83,7 +84,7 @@ ok() { printf "${GREEN}%s${RESET}\n" "$1"; }
 colorize_line() {
 	sed \
 		-e "s/\\(^\\|[^[:alnum:]_'-]\\)\\(mcli\\)\\([^[:alnum:]_'-]\\|$\\)/\\1${GREEN}\\2${RESET}\\3/g" \
-		-e "s/\\(^\\|[^[:alnum:]_'-]\\)\\(list\\|create-network\\|start\\|stop\\|restart\\|pull\\|backup\\|enable\\|disable\\|update\\|version\\|help\\)\\([^[:alnum:]_'-]\\|$\\)/\\1${YELLOW}\\2${RESET}\\3/g" \
+		-e "s/\\(^\\|[^[:alnum:]_'-]\\)\\(list\\|create-network\\|start\\|stop\\|restart\\|pull\\|backup\\|restore\\|enable\\|disable\\|update\\|version\\|help\\)\\([^[:alnum:]_'-]\\|$\\)/\\1${YELLOW}\\2${RESET}\\3/g" \
 		-e "s/--[a-z][a-z-]*/${CYAN}&${RESET}/g" \
 		-e "s/\([ ,]\)\(-[a-z]\)/\\1${CYAN}\\2${RESET}/g"
 }
@@ -621,6 +622,141 @@ backup() {
 	fi
 }
 
+# ── Restore command ───────────────────────────────────────────────────────────
+restore() {
+	if [ $# -ne 1 ]; then
+		error "Usage: mcli restore <service>"
+		return 1
+	fi
+	local service="$1"
+
+	if ! is_known_service "$service"; then
+		error "Unknown service: ${CYAN}${service}${RESET}"
+		return 1
+	fi
+
+	local bkp_dir=".bkp/${service}"
+
+	# Collect all available backups (top-level + pre-restore/), sorted by name
+	local backups=()
+	shopt -s nullglob
+	for f in "${bkp_dir}"/*.tar.gz "${bkp_dir}"/pre-restore/*.tar.gz; do
+		backups+=("$f")
+	done
+	shopt -u nullglob
+
+	if [ ${#backups[@]} -eq 0 ]; then
+		error "No backups found for ${CYAN}${service}${RESET} in ${bkp_dir}/"
+		return 1
+	fi
+
+	local chosen
+	if [ ${#backups[@]} -eq 1 ]; then
+		chosen="${backups[0]}"
+		log "Restoring ${CYAN}${service}${RESET} from $(basename "$chosen")"
+	elif $dry_run; then
+		log "Available backups for ${CYAN}${service}${RESET}:"
+		local i=1
+		for f in "${backups[@]}"; do
+			printf "  %d) %s\n" "$i" "$(basename "$f")" >&2
+			((i++))
+		done
+		dry_run_log "Would prompt: Select backup [1-${#backups[@]}]"
+		chosen="${backups[0]}"
+		log "Restoring ${CYAN}${service}${RESET} from $(basename "$chosen") (dry-run: using first)"
+	else
+		log "Available backups for ${CYAN}${service}${RESET}:"
+		local i=1
+		for f in "${backups[@]}"; do
+			printf "  %d) %s\n" "$i" "$(basename "$f")" >&2
+			((i++))
+		done
+		local choice
+		while true; do
+			printf "Select backup [1-%d]: " "${#backups[@]}" >&2
+			read -r choice
+			if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#backups[@]}" ]; then
+				break
+			fi
+			error "Invalid selection. Enter a number between 1 and ${#backups[@]}."
+		done
+		chosen="${backups[$((choice - 1))]}"
+		log "Restoring ${CYAN}${service}${RESET} from $(basename "$chosen")"
+	fi
+
+	# Stop service first (ensures a clean snapshot if user requests pre-restore backup)
+	log "Stopping ${CYAN}${service}${RESET} before restore"
+	local stop_cmd
+	stop_cmd="docker compose --project-directory \"$service\" down --remove-orphans"
+	if $dry_run; then
+		dry_run_log "$stop_cmd"
+	else
+		if ! eval "$stop_cmd"; then
+			error "Failed to stop ${CYAN}${service}${RESET} before restore"
+			return 1
+		fi
+	fi
+
+	# Pre-restore backup prompt (after stop, so the archive captures a clean state)
+	if $dry_run; then
+		dry_run_log "Prompt: 'Back up current version before restoring? [y/N]'"
+		dry_run_log "sudo tar czf \"${bkp_dir}/pre-restore/<date>.tar.gz\" -C \"${service}\" ."
+	else
+		local pre_restore_ans
+		printf "Back up current version before restoring? [y/N] " >&2
+		read -r pre_restore_ans
+		if [[ "$pre_restore_ans" =~ ^[Yy]$ ]]; then
+			local today pre_restore_dir pre_restore_dest
+			today=$(date +%Y-%m-%d)
+			pre_restore_dir="${bkp_dir}/pre-restore"
+			pre_restore_dest="${pre_restore_dir}/${today}.tar.gz"
+			mkdir -p "$pre_restore_dir"
+			if [ -f "$pre_restore_dest" ]; then
+				local counter=1
+				while [ -f "${pre_restore_dir}/${today}.${counter}.tar.gz" ]; do
+					((counter++))
+				done
+				pre_restore_dest="${pre_restore_dir}/${today}.${counter}.tar.gz"
+			fi
+			log "Creating pre-restore backup of ${CYAN}${service}${RESET}"
+			if ! sudo tar czf "$pre_restore_dest" -C "$service" .; then
+				error "Failed to create pre-restore backup"
+				return 1
+			fi
+			ok "Pre-restore backup: ${pre_restore_dest}"
+		fi
+	fi
+
+	# Extract archive into service directory
+	log "Extracting $(basename "$chosen") into ${service}/"
+	local restore_cmd
+	restore_cmd="sudo tar xzf \"${chosen}\" -C \"${service}\""
+	if $dry_run; then
+		dry_run_log "$restore_cmd"
+	else
+		if ! eval "$restore_cmd"; then
+			error "Restore of ${CYAN}${service}${RESET} failed"
+			log "Attempting to restart ${CYAN}${service}${RESET} after failed restore"
+			docker compose --project-directory "$service" up -d || true
+			return 1
+		fi
+		ok "Restored: $(basename "$chosen") → ${service}/"
+	fi
+
+	# Start service
+	log "Starting ${CYAN}${service}${RESET} after restore"
+	local start_cmd
+	start_cmd="docker compose --project-directory \"$service\" up -d"
+	if $dry_run; then
+		dry_run_log "$start_cmd"
+	else
+		if ! eval "$start_cmd"; then
+			error "Failed to start ${CYAN}${service}${RESET} after restore"
+			return 1
+		fi
+	fi
+}
+
 # ── Update command ────────────────────────────────────────────────────────────
 INSTALLER_SELF_URL="https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/install.sh"
 update() {
@@ -680,6 +816,7 @@ stop) stop "${service_args[@]}" ;;
 restart) restart "${service_args[@]}" ;;
 pull) pull "${service_args[@]}" ;;
 backup) backup "${service_args[@]}" ;;
+restore) restore "${service_args[@]}" ;;
 enable) enable "${service_args[@]}" ;;
 disable) disable "${service_args[@]}" ;;
 update) update ;;
