@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.10.1"
+VERSION="0.10.2"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -480,11 +480,13 @@ backup_size() {
 	local found=false
 	local max_width=5  # at least len("total")
 	local -a names sizes
+	local err_file
+	err_file=$(mktemp)
 	shopt -s nullglob
 	for svc_dir in "$bkp_root"/*/; do
 		found=true
 		local size name
-		size=$(du -sh "$svc_dir" 2>/dev/null | cut -f1) || true
+		size=$(du -sh "$svc_dir" 2>>"$err_file" | cut -f1) || true
 		name="${svc_dir#"$bkp_root"/}"
 		name="${name%/}"
 		names+=("$name")
@@ -493,6 +495,7 @@ backup_size() {
 	done
 	shopt -u nullglob
 	if ! $found; then
+		rm -f "$err_file"
 		ok "No backups found"
 		return 0
 	fi
@@ -501,9 +504,13 @@ backup_size() {
 		printf "  ${CYAN}%-*s${RESET}  %s\n" "$max_width" "${names[$i]}" "${sizes[$i]}"
 	done
 	local total
-	total=$(du -sh "$bkp_root" 2>/dev/null | cut -f1) || true
+	total=$(du -sh "$bkp_root" 2>>"$err_file" | cut -f1) || true
 	printf "  %s\n" "$(printf '%*s' "$((max_width + 2))" '' | tr ' ' '-')"
 	printf "  ${BOLD}%-*s${RESET}  %s\n" "$max_width" "total" "$total"
+	if [[ -s "$err_file" ]]; then
+		printf "${YELLOW}note:${RESET} some sizes may be under-counted due to permission errors; run with sudo for full coverage\n" >&2
+	fi
+	rm -f "$err_file"
 }
 
 backup() {
