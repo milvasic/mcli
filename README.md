@@ -51,6 +51,7 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | `disable <services..>`       | Disable one or more services (excluded from start/stop/restart/pull) |
 | `enable <services..>`        | Re-enable one or more previously disabled services                   |
 | `update`                     | Update mcli to the latest version                                    |
+| `completions bash\|zsh`      | Output shell completion script for bash or zsh                       |
 | `version`, `--version`, `-v` | Print version                                                        |
 | `help`, `--help`, `-h`       | Show help message                                                    |
 
@@ -125,7 +126,30 @@ All services share a Docker bridge network named `services`. Use `mcli create-ne
 
 Disabled services are stored in `${XDG_CONFIG_HOME:-~/.config}/mcli/disabled`. Each entry is a full path to the service directory, scoped by the working directory from which `mcli disable` was run. This means different service directories maintain independent disabled lists.
 
+## Shell Completions
+
+`mcli completions` outputs a completion script for bash or zsh. Source it once or add the line to your shell's config file.
+
+**Bash** — add to `~/.bashrc`:
+
+```sh
+source <(mcli completions bash)
+```
+
+**Zsh** — add to `~/.zshrc`:
+
+```sh
+source <(mcli completions zsh)
+```
+
+Completions cover all commands and, for commands that operate on services, dynamically suggest discovered service names.
+
 ## Changelog
+
+### 0.10.0
+
+- Added `mcli completions bash|zsh` command to output shell completion scripts for bash and zsh
+- Completions cover all commands and dynamically suggest service names for service-aware commands
 
 ### 0.9.0
 

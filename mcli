@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.9.0"
+VERSION="0.10.0"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -28,6 +28,7 @@ Commands:
   disable <services..>      # Disable one or more services (excluded from start/stop/restart/pull)
   enable <services..>       # Re-enable one or more previously disabled services
   update                    # Update mcli to the latest version
+  completions bash|zsh      # Output shell completion script (source to activate)
   version, --version, -v    # Print version
   help, --help, -h          # Show this message
 
@@ -48,6 +49,12 @@ Service discovery:
 
 Configuration:
   Disabled services are stored in ${XDG_CONFIG_HOME:-~/.config}/mcli/disabled
+
+Shell completions:
+  # Bash (add to ~/.bashrc):
+  source <(mcli completions bash)
+  # Zsh (add to ~/.zshrc):
+  source <(mcli completions zsh)
 
 Usage example:
   mcli start                        # starts all enabled services by default
@@ -84,7 +91,7 @@ ok() { printf "${GREEN}%s${RESET}\n" "$1"; }
 colorize_line() {
 	sed \
 		-e "s/\\(^\\|[^[:alnum:]_'-]\\)\\(mcli\\)\\([^[:alnum:]_'-]\\|$\\)/\\1${GREEN}\\2${RESET}\\3/g" \
-		-e "s/\\(^\\|[^[:alnum:]_'-]\\)\\(list\\|create-network\\|start\\|stop\\|restart\\|pull\\|backup\\|restore\\|enable\\|disable\\|update\\|version\\|help\\)\\([^[:alnum:]_'-]\\|$\\)/\\1${YELLOW}\\2${RESET}\\3/g" \
+		-e "s/\\(^\\|[^[:alnum:]_'-]\\)\\(list\\|create-network\\|start\\|stop\\|restart\\|pull\\|backup\\|restore\\|enable\\|disable\\|update\\|completions\\|version\\|help\\)\\([^[:alnum:]_'-]\\|$\\)/\\1${YELLOW}\\2${RESET}\\3/g" \
 		-e "s/--[a-z][a-z-]*/${CYAN}&${RESET}/g" \
 		-e "s/\([ ,]\)\(-[a-z]\)/\\1${CYAN}\\2${RESET}/g"
 }
@@ -757,6 +764,123 @@ restore() {
 	fi
 }
 
+# ── Completions command ───────────────────────────────────────────────────────
+completions() {
+	local shell="${1:-}"
+	case "$shell" in
+	bash)
+		cat <<'BASH_COMPLETION'
+# mcli bash completion
+# Source this file or add to ~/.bashrc: source <(mcli completions bash)
+
+__mcli_services() {
+	mcli list 2>/dev/null \
+		| sed 's/\x1b\[[0-9;]*m//g; s/^ *//; s/ (disabled)//' \
+		| grep -v '^(none found)$' | grep -v '^$'
+}
+
+_mcli() {
+	COMPREPLY=()
+	local cur="${COMP_WORDS[COMP_CWORD]}"
+	local cword="$COMP_CWORD"
+	local command="${COMP_WORDS[1]:-}"
+	local all_commands="list create-network start stop restart pull backup restore disable enable update completions version help"
+
+	if [[ "$cword" -eq 1 ]]; then
+		COMPREPLY=($(compgen -W "$all_commands" -- "$cur"))
+		return
+	fi
+
+	case "$command" in
+	start | stop | restart | pull)
+		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run --all" -- "$cur"))
+		;;
+	disable | enable | restore)
+		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run" -- "$cur"))
+		;;
+	backup)
+		COMPREPLY=($(compgen -W "size $(__mcli_services) --dry-run --live" -- "$cur"))
+		;;
+	completions)
+		COMPREPLY=($(compgen -W "bash zsh" -- "$cur"))
+		;;
+	create-network | update)
+		COMPREPLY=($(compgen -W "--dry-run" -- "$cur"))
+		;;
+	esac
+}
+
+complete -F _mcli mcli
+BASH_COMPLETION
+		;;
+	zsh)
+		cat <<'ZSH_COMPLETION'
+#compdef mcli
+# mcli zsh completion
+# Source this file or add to ~/.zshrc: source <(mcli completions zsh)
+
+_mcli() {
+	local cur="${words[CURRENT]}"
+	local cmd="${words[2]:-}"
+	local -a services
+
+	if [[ $CURRENT -eq 2 ]]; then
+		local -a commands
+		commands=(
+			'list:List discovered services'
+			'create-network:Ensure the shared services Docker bridge network exists'
+			'start:Start all or specified services'
+			'stop:Stop all or specified services'
+			'restart:Restart all or specified services'
+			'pull:Pull latest images for services'
+			'backup:Back up a service'
+			'restore:Restore a service from a backup archive'
+			'disable:Disable one or more services'
+			'enable:Re-enable one or more services'
+			'update:Update mcli to the latest version'
+			'completions:Output shell completions script'
+			'version:Print version'
+			'help:Show help message'
+		)
+		_describe 'command' commands
+		return
+	fi
+
+	services=(${(f)"$(mcli list 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g; s/^ *//; s/ (disabled)//' | grep -v '^(none found)$' | grep -v '^$')"})
+
+	case "$cmd" in
+	start | stop | restart | pull)
+		compadd -a services
+		compadd -- --dry-run --all
+		;;
+	disable | enable | restore)
+		compadd -a services
+		compadd -- --dry-run
+		;;
+	backup)
+		compadd -- size
+		compadd -a services
+		compadd -- --dry-run --live
+		;;
+	completions)
+		compadd -- bash zsh
+		;;
+	create-network | update)
+		compadd -- --dry-run
+		;;
+	esac
+}
+
+_mcli "$@"
+ZSH_COMPLETION
+		;;
+	*)
+		error "Usage: mcli completions <bash|zsh>"
+		return 1
+		;;
+	esac
+}
+
 # ── Update command ────────────────────────────────────────────────────────────
 INSTALLER_SELF_URL="https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/install.sh"
 update() {
@@ -820,6 +944,7 @@ restore) restore "${service_args[@]}" ;;
 enable) enable "${service_args[@]}" ;;
 disable) disable "${service_args[@]}" ;;
 update) update ;;
+completions) completions "${service_args[@]}" ;;
 version | --version | -v) echo "$VERSION" ;;
 help | --help | -h) help ;;
 *)
