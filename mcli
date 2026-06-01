@@ -875,8 +875,9 @@ _mcli "$@"
 ZSH_COMPLETION
 		;;
 	*)
-		error "Usage: mcli completions <bash|zsh>"
-		return 1
+		error "Usage: mcli completions <shell>"
+		printf "Supported shells: bash, zsh\n" >&2
+		exit 1
 		;;
 	esac
 }
