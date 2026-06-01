@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.10.0"
+VERSION="0.10.1"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -731,6 +731,23 @@ restore() {
 				return 1
 			fi
 			ok "Pre-restore backup: ${pre_restore_dest}"
+		fi
+	fi
+
+	# Clean service dir so restore matches the archive exactly (files added after
+	# the backup would otherwise survive, since tar only overwrites overlapping
+	# paths). Note: this also wipes bind-mounted paths nested under $service.
+	log "Cleaning ${service}/ before extraction"
+	local clean_cmd
+	clean_cmd="sudo find \"${service}\" -mindepth 1 -delete"
+	if $dry_run; then
+		dry_run_log "$clean_cmd"
+	else
+		if ! eval "$clean_cmd"; then
+			error "Failed to clean ${CYAN}${service}${RESET} before restore"
+			log "Attempting to restart ${CYAN}${service}${RESET} after failed cleanup"
+			docker compose --project-directory "$service" up -d || true
+			return 1
 		fi
 	fi
 

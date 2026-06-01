@@ -47,7 +47,7 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | `backup <service>`           | Stop service, back up to `.bkp/<service>/<date>[.<counter>].tar.gz`, restart service. Archive includes `image.txt` with container image digests. |
 | `backup <service> --live`    | Back up without stopping (live backup)                               |
 | `backup size`                | Show disk space used by all backups under `.bkp/`                   |
-| `restore <service>`          | Restore service from a backup archive in `.bkp/<service>/`; interactive picker when multiple backups exist |
+| `restore <service>`          | Restore service from a backup archive in `.bkp/<service>/`; interactive picker when multiple backups exist. Wipes the service dir before extraction so its contents match the archive exactly. |
 | `disable <services..>`       | Disable one or more services (excluded from start/stop/restart/pull) |
 | `enable <services..>`        | Re-enable one or more previously disabled services                   |
 | `update`                     | Update mcli to the latest version                                    |
@@ -145,6 +145,11 @@ source <(mcli completions zsh)
 Completions cover all commands and, for commands that operate on services, dynamically suggest discovered service names.
 
 ## Changelog
+
+### 0.10.1
+
+- `mcli restore <service>` now wipes the service directory before extracting the archive, so the restored state matches the archive exactly (previously, files added after the backup were left in place because `tar` only overwrites overlapping paths)
+- Caveat: any bind-mount path nested under the service directory is also wiped — keep host-side volumes outside the service folder
 
 ### 0.10.0
 
