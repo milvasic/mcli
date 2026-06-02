@@ -44,7 +44,7 @@ Options:
                             #   (can appear anywhere after the command)
 
 Service discovery:
-  - Each service is an immediate subfolder containing a docker compose file (docker-compose.yml or docker-compose.yaml)
+  - Each service is an immediate subfolder containing a docker compose file (docker-compose.yml, docker-compose.yaml, compose.yml, or compose.yaml)
   - Folders in .gitignore (simple literal prefix matching only), folders with a .git directory, and symlinks are skipped
 
 Configuration:
@@ -156,10 +156,13 @@ get_services() {
 		done
 		# skip if .git exists in the folder
 		[ -d "$dir/.git" ] && continue
-		# must have docker-compose.yml or docker-compose.yaml
-		if [ -f "$dir/docker-compose.yml" ] || [ -f "$dir/docker-compose.yaml" ]; then
-			services+=("${dir%/}")
-		fi
+		# must have a Compose file (v1 or v2 default filename)
+		for name in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
+			if [ -f "$dir/$name" ]; then
+				services+=("${dir%/}")
+				break
+			fi
+		done
 	done
 	shopt -u nullglob
 	[[ ${#services[@]} -gt 0 ]] && printf '%s\n' "${services[@]}"

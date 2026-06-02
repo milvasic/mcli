@@ -2,7 +2,7 @@
 
 A single-file Bash CLI for managing Docker Compose services.
 
-Each service is an immediate subdirectory containing a `docker-compose.yml` (or `docker-compose.yaml`). `mcli` discovers these automatically and lets you start, stop, restart, pull images and more for all of them — or just the ones you name.
+Each service is an immediate subdirectory containing a Compose file (`docker-compose.yml`, `docker-compose.yaml`, `compose.yml`, or `compose.yaml`). `mcli` discovers these automatically and lets you start, stop, restart, pull images and more for all of them — or just the ones you name.
 
 ## Install
 
@@ -110,7 +110,7 @@ mcli restore my-service --dry-run
 
 ## Service Discovery
 
-`mcli` scans immediate subdirectories of the current working directory for Docker Compose files. A folder is recognized as a service if it contains `docker-compose.yml` or `docker-compose.yaml`.
+`mcli` scans immediate subdirectories of the current working directory for Docker Compose files. A folder is recognized as a service if it contains `docker-compose.yml`, `docker-compose.yaml`, `compose.yml`, or `compose.yaml` (the Compose v2 default filenames).
 
 The following are skipped during discovery:
 
