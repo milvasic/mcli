@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.10.3"
+VERSION="0.10.4"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -232,8 +232,8 @@ list() {
 				enabled+=("$service")
 			fi
 		done
-		IFS=$'\n' read -r -d '' -a enabled < <(printf '%s\n' "${enabled[@]}" | sort && printf '\0') || true
-		IFS=$'\n' read -r -d '' -a disabled < <(printf '%s\n' "${disabled[@]}" | sort && printf '\0') || true
+		mapfile -t enabled < <(printf '%s\n' "${enabled[@]}" | sort)
+		mapfile -t disabled < <(printf '%s\n' "${disabled[@]}" | sort)
 		for service in "${enabled[@]}"; do
 			printf "  ${CYAN}%s${RESET}\n" "$service"
 		done
