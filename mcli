@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.10.6"
+VERSION="0.10.7"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -122,12 +122,58 @@ config_file() {
 	echo "${XDG_CONFIG_HOME:-$HOME/.config}/mcli/disabled"
 }
 
+# Canonical path of $PWD. Falls back through readlink → realpath → pwd so
+# the disabled-services config keys off a stable identity even when the
+# directory is reached via a symlink (e.g. /srv/stack → /data/stack).
+canonical_pwd() {
+	readlink -f . 2>/dev/null || realpath . 2>/dev/null || pwd
+}
+
+# Rewrite legacy entries whose directory resolves to $pwd_canonical via a
+# non-canonical path. Idempotent: a no-op when all entries are already
+# canonical. Called from the write paths so the config self-heals the
+# next time a user runs enable/disable from the affected directory.
+migrate_disabled_config() {
+	local cf="$1" pwd_canonical="$2"
+	[ -f "$cf" ] || return 0
+	local rewrote=false line dir base resolved
+	local -a out=()
+	while IFS= read -r line; do
+		if [[ -z "$line" ]]; then
+			out+=("$line")
+			continue
+		fi
+		dir="${line%/*}"
+		base="${line##*/}"
+		if [[ "$dir" != "$pwd_canonical" ]] && [ -d "$dir" ]; then
+			resolved="$(readlink -f "$dir" 2>/dev/null || realpath "$dir" 2>/dev/null || echo "$dir")"
+			if [[ "$resolved" == "$pwd_canonical" ]]; then
+				line="$pwd_canonical/$base"
+				rewrote=true
+			fi
+		fi
+		out+=("$line")
+	done <"$cf"
+	$rewrote || return 0
+	declare -A seen=()
+	{
+		for line in "${out[@]}"; do
+			if [[ -z "$line" ]]; then
+				printf '\n'
+			elif [[ -z "${seen[$line]:-}" ]]; then
+				seen[$line]=1
+				printf '%s\n' "$line"
+			fi
+		done
+	} >"$cf"
+}
+
 get_disabled_services() {
 	local cf
 	cf=$(config_file)
 	[ -f "$cf" ] || return 0
 	local prefix
-	prefix="$(pwd)/"
+	prefix="$(canonical_pwd)/"
 	while IFS= read -r line; do
 		[[ -z "$line" ]] && continue
 		if [[ "$line" == "$prefix"* ]]; then
@@ -141,7 +187,7 @@ is_service_disabled() {
 	local cf
 	cf=$(config_file)
 	[ -f "$cf" ] || return 1
-	grep -qxF "$(pwd)/$service" "$cf"
+	grep -qxF "$(canonical_pwd)/$service" "$cf"
 }
 
 # ── Service discovery ─────────────────────────────────────────────────────────
@@ -353,11 +399,13 @@ enable() {
 	done
 	$invalid && return 1
 
-	local cf
+	local cf pwd_canonical
 	cf=$(config_file)
+	pwd_canonical="$(canonical_pwd)"
+	migrate_disabled_config "$cf" "$pwd_canonical"
 	for arg in "$@"; do
 		local entry
-		entry="$(pwd)/$arg"
+		entry="$pwd_canonical/$arg"
 		if [ -f "$cf" ] && grep -qxF "$entry" "$cf"; then
 			local tmp
 			tmp=$(grep -vxF "$entry" "$cf" || true)
@@ -393,13 +441,15 @@ disable() {
 	done
 	$invalid && return 1
 
-	local cf
+	local cf pwd_canonical
 	cf=$(config_file)
+	pwd_canonical="$(canonical_pwd)"
 	mkdir -p "$(dirname "$cf")"
 	touch "$cf"
+	migrate_disabled_config "$cf" "$pwd_canonical"
 	for arg in "$@"; do
 		local entry
-		entry="$(pwd)/$arg"
+		entry="$pwd_canonical/$arg"
 		if grep -qxF "$entry" "$cf"; then
 			ok "${CYAN}${arg}${RESET} is already disabled"
 		else
