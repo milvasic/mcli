@@ -146,6 +146,10 @@ Completions cover all commands and, for commands that operate on services, dynam
 
 ## Changelog
 
+### 0.10.3
+
+- `mcli restore <service>` picker now distinguishes pre-restore snapshots from regular backups: regular archives are listed first, then pre-restore archives tagged `[pre-restore] <name>`, so identically-named files in `.bkp/<service>/` and `.bkp/<service>/pre-restore/` are no longer indistinguishable
+
 ### 0.10.2
 
 - `mcli backup size` now prints a `note:` line when `du` hits permission errors on backup subdirectories, so under-counted sizes are visible instead of silently swallowed; run with `sudo` for full coverage

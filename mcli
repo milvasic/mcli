@@ -644,11 +644,19 @@ restore() {
 
 	local bkp_dir=".bkp/${service}"
 
-	# Collect all available backups (top-level + pre-restore/), sorted by name
+	# Collect available backups: regular first, then pre-restore (tagged), so the
+	# picker visually separates the two and never renders identically-named
+	# archives on the same line.
 	local backups=()
+	local labels=()
 	shopt -s nullglob
-	for f in "${bkp_dir}"/*.tar.gz "${bkp_dir}"/pre-restore/*.tar.gz; do
+	for f in "${bkp_dir}"/*.tar.gz; do
 		backups+=("$f")
+		labels+=("$(basename "$f")")
+	done
+	for f in "${bkp_dir}"/pre-restore/*.tar.gz; do
+		backups+=("$f")
+		labels+=("[pre-restore] $(basename "$f")")
 	done
 	shopt -u nullglob
 
@@ -658,24 +666,27 @@ restore() {
 	fi
 
 	local chosen
+	local chosen_label
 	if [ ${#backups[@]} -eq 1 ]; then
 		chosen="${backups[0]}"
-		log "Restoring ${CYAN}${service}${RESET} from $(basename "$chosen")"
+		chosen_label="${labels[0]}"
+		log "Restoring ${CYAN}${service}${RESET} from ${chosen_label}"
 	elif $dry_run; then
 		log "Available backups for ${CYAN}${service}${RESET}:"
 		local i=1
-		for f in "${backups[@]}"; do
-			printf "  %d) %s\n" "$i" "$(basename "$f")" >&2
+		for label in "${labels[@]}"; do
+			printf "  %d) %s\n" "$i" "$label" >&2
 			((i++))
 		done
 		dry_run_log "Would prompt: Select backup [1-${#backups[@]}]"
 		chosen="${backups[0]}"
-		log "Restoring ${CYAN}${service}${RESET} from $(basename "$chosen") (dry-run: using first)"
+		chosen_label="${labels[0]}"
+		log "Restoring ${CYAN}${service}${RESET} from ${chosen_label} (dry-run: using first)"
 	else
 		log "Available backups for ${CYAN}${service}${RESET}:"
 		local i=1
-		for f in "${backups[@]}"; do
-			printf "  %d) %s\n" "$i" "$(basename "$f")" >&2
+		for label in "${labels[@]}"; do
+			printf "  %d) %s\n" "$i" "$label" >&2
 			((i++))
 		done
 		local choice
@@ -688,7 +699,8 @@ restore() {
 			error "Invalid selection. Enter a number between 1 and ${#backups[@]}."
 		done
 		chosen="${backups[$((choice - 1))]}"
-		log "Restoring ${CYAN}${service}${RESET} from $(basename "$chosen")"
+		chosen_label="${labels[$((choice - 1))]}"
+		log "Restoring ${CYAN}${service}${RESET} from ${chosen_label}"
 	fi
 
 	# Stop service first (ensures a clean snapshot if user requests pre-restore backup)
