@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.10.4"
+VERSION="0.10.5"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -86,6 +86,13 @@ log() { printf "\n${BOLD}=== %s ===${RESET}\n" "$1" >&2; }
 dry_run_log() { printf "${YELLOW}[dry-run]${RESET} %s\n" "$1" >&2; }
 error() { printf "${RED}ERROR:${RESET} %s\n" "$1" >&2; }
 ok() { printf "${GREEN}%s${RESET}\n" "$1"; }
+
+# Render argv as a shell-safe, copy-pasteable command string for dry-run logs.
+print_cmd() {
+	local out
+	out=$(printf '%q ' "$@")
+	printf '%s' "${out% }"
+}
 
 # ── Help colorizer ───────────────────────────────────────────────────────────
 colorize_line() {
@@ -266,12 +273,11 @@ start() {
 	local failed=()
 	for service in "${services[@]}"; do
 		log "Starting ${CYAN}${service}${RESET}"
-		local cmd
-		cmd="docker compose --project-directory \"$service\" up -d"
+		local -a cmd=(docker compose --project-directory "$service" up -d)
 		if $dry_run; then
-			dry_run_log "$cmd"
+			dry_run_log "$(print_cmd "${cmd[@]}")"
 		else
-			if ! eval "$cmd"; then
+			if ! "${cmd[@]}"; then
 				error "${CYAN}${service}${RESET} start failed"
 				failed+=("$service")
 			fi
@@ -291,12 +297,11 @@ stop() {
 	local failed=()
 	for service in "${services[@]}"; do
 		log "Stopping ${CYAN}${service}${RESET}"
-		local cmd
-		cmd="docker compose --project-directory \"$service\" down --remove-orphans"
+		local -a cmd=(docker compose --project-directory "$service" down --remove-orphans)
 		if $dry_run; then
-			dry_run_log "$cmd"
+			dry_run_log "$(print_cmd "${cmd[@]}")"
 		else
-			if ! eval "$cmd"; then
+			if ! "${cmd[@]}"; then
 				error "${CYAN}${service}${RESET} stop failed"
 				failed+=("$service")
 			fi
@@ -398,12 +403,11 @@ pull() {
 	local failed=()
 	for service in "${services[@]}"; do
 		log "Pulling images for ${CYAN}${service}${RESET} (skipping buildable services)"
-		local cmd
-		cmd="docker compose --project-directory \"$service\" pull --ignore-buildable"
+		local -a cmd=(docker compose --project-directory "$service" pull --ignore-buildable)
 		if $dry_run; then
-			dry_run_log "$cmd"
+			dry_run_log "$(print_cmd "${cmd[@]}")"
 		else
-			if ! eval "$cmd"; then
+			if ! "${cmd[@]}"; then
 				error "${CYAN}${service}${RESET} pull failed"
 				failed+=("$service")
 			fi
@@ -546,12 +550,11 @@ backup() {
 	# Stop service before backup unless --live is set
 	if ! $live; then
 		log "Stopping ${CYAN}${service}${RESET} before backup"
-		local stop_cmd
-		stop_cmd="docker compose --project-directory \"$service\" down --remove-orphans"
+		local -a stop_cmd=(docker compose --project-directory "$service" down --remove-orphans)
 		if $dry_run; then
-			dry_run_log "$stop_cmd"
+			dry_run_log "$(print_cmd "${stop_cmd[@]}")"
 		else
-			if ! eval "$stop_cmd"; then
+			if ! "${stop_cmd[@]}"; then
 				error "Failed to stop ${CYAN}${service}${RESET} before backup"
 				return 1
 			fi
@@ -628,12 +631,11 @@ backup() {
 	# Restart service after backup unless --live is set
 	if ! $live; then
 		log "Restarting ${CYAN}${service}${RESET} after backup"
-		local start_cmd
-		start_cmd="docker compose --project-directory \"$service\" up -d"
+		local -a start_cmd=(docker compose --project-directory "$service" up -d)
 		if $dry_run; then
-			dry_run_log "$start_cmd"
+			dry_run_log "$(print_cmd "${start_cmd[@]}")"
 		else
-			if ! eval "$start_cmd"; then
+			if ! "${start_cmd[@]}"; then
 				error "Failed to restart ${CYAN}${service}${RESET} after backup"
 				return 1
 			fi
@@ -717,12 +719,11 @@ restore() {
 
 	# Stop service first (ensures a clean snapshot if user requests pre-restore backup)
 	log "Stopping ${CYAN}${service}${RESET} before restore"
-	local stop_cmd
-	stop_cmd="docker compose --project-directory \"$service\" down --remove-orphans"
+	local -a stop_cmd=(docker compose --project-directory "$service" down --remove-orphans)
 	if $dry_run; then
-		dry_run_log "$stop_cmd"
+		dry_run_log "$(print_cmd "${stop_cmd[@]}")"
 	else
-		if ! eval "$stop_cmd"; then
+		if ! "${stop_cmd[@]}"; then
 			error "Failed to stop ${CYAN}${service}${RESET} before restore"
 			return 1
 		fi
@@ -762,12 +763,11 @@ restore() {
 	# the backup would otherwise survive, since tar only overwrites overlapping
 	# paths). Note: this also wipes bind-mounted paths nested under $service.
 	log "Cleaning ${service}/ before extraction"
-	local clean_cmd
-	clean_cmd="sudo find \"${service}\" -mindepth 1 -delete"
+	local -a clean_cmd=(sudo find "$service" -mindepth 1 -delete)
 	if $dry_run; then
-		dry_run_log "$clean_cmd"
+		dry_run_log "$(print_cmd "${clean_cmd[@]}")"
 	else
-		if ! eval "$clean_cmd"; then
+		if ! "${clean_cmd[@]}"; then
 			error "Failed to clean ${CYAN}${service}${RESET} before restore"
 			log "Attempting to restart ${CYAN}${service}${RESET} after failed cleanup"
 			docker compose --project-directory "$service" up -d || true
@@ -777,12 +777,11 @@ restore() {
 
 	# Extract archive into service directory
 	log "Extracting $(basename "$chosen") into ${service}/"
-	local restore_cmd
-	restore_cmd="sudo tar xzf \"${chosen}\" -C \"${service}\""
+	local -a restore_cmd=(sudo tar xzf "$chosen" -C "$service")
 	if $dry_run; then
-		dry_run_log "$restore_cmd"
+		dry_run_log "$(print_cmd "${restore_cmd[@]}")"
 	else
-		if ! eval "$restore_cmd"; then
+		if ! "${restore_cmd[@]}"; then
 			error "Restore of ${CYAN}${service}${RESET} failed"
 			log "Attempting to restart ${CYAN}${service}${RESET} after failed restore"
 			docker compose --project-directory "$service" up -d || true
@@ -793,12 +792,11 @@ restore() {
 
 	# Start service
 	log "Starting ${CYAN}${service}${RESET} after restore"
-	local start_cmd
-	start_cmd="docker compose --project-directory \"$service\" up -d"
+	local -a start_cmd=(docker compose --project-directory "$service" up -d)
 	if $dry_run; then
-		dry_run_log "$start_cmd"
+		dry_run_log "$(print_cmd "${start_cmd[@]}")"
 	else
-		if ! eval "$start_cmd"; then
+		if ! "${start_cmd[@]}"; then
 			error "Failed to start ${CYAN}${service}${RESET} after restore"
 			return 1
 		fi
