@@ -146,6 +146,11 @@ Completions cover all commands and, for commands that operate on services, dynam
 
 ## Changelog
 
+### 0.10.7
+
+- Disabled-services config now keys off the canonical path of the current directory (`readlink -f` / `realpath`) instead of `$(pwd)`, so a service stays disabled regardless of whether you enter the project through a symlink or its real path
+- Legacy non-canonical entries are migrated transparently the next time any `mcli` command (`list`, `start`, `stop`, `restart`, `pull`, `enable`, `disable`) runs from the affected directory, so services previously disabled via a symlink path stay disabled across the upgrade without manual intervention
+
 ### 0.10.6
 
 - Service discovery now uses `git check-ignore` to respect `.gitignore` with full gitignore semantics (negation, leading/trailing `/`, `**` globs) instead of substring-prefix matching against raw `.gitignore` lines, which previously skipped `node-app/` for a `node` entry and ignored `!`-negations. Requires git and a git work tree; outside a git repo `.gitignore` is not honored.
