@@ -115,7 +115,7 @@ mcli restore my-service --dry-run
 The following are skipped during discovery:
 
 - Symlinks
-- Directories listed in `.gitignore` (simple literal prefix matching)
+- Directories ignored by git (matched with `git check-ignore`, so full `.gitignore` semantics apply — negation, leading/trailing `/`, `**` globs). Requires being inside a git work tree; outside a git repo, `.gitignore` is not honored.
 - Directories containing a `.git` folder
 
 ## Shared Network
@@ -145,6 +145,10 @@ source <(mcli completions zsh)
 Completions cover all commands and, for commands that operate on services, dynamically suggest discovered service names.
 
 ## Changelog
+
+### 0.10.6
+
+- Service discovery now uses `git check-ignore` to respect `.gitignore` with full gitignore semantics (negation, leading/trailing `/`, `**` globs) instead of substring-prefix matching against raw `.gitignore` lines, which previously skipped `node-app/` for a `node` entry and ignored `!`-negations. Requires git and a git work tree; outside a git repo `.gitignore` is not honored.
 
 ### 0.10.5
 

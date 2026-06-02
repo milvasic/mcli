@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.10.5"
+VERSION="0.10.6"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -45,7 +45,7 @@ Options:
 
 Service discovery:
   - Each service is an immediate subfolder containing a docker compose file (docker-compose.yml, docker-compose.yaml, compose.yml, or compose.yaml)
-  - Folders in .gitignore (simple literal prefix matching only), folders with a .git directory, and symlinks are skipped
+  - Folders ignored by git (via `git check-ignore`, full gitignore semantics), folders with a .git directory, and symlinks are skipped
 
 Configuration:
   Disabled services are stored in ${XDG_CONFIG_HOME:-~/.config}/mcli/disabled
@@ -147,9 +147,11 @@ is_service_disabled() {
 # ── Service discovery ─────────────────────────────────────────────────────────
 get_services() {
 	local services=()
-	local gitignore=()
-	if [ -f .gitignore ]; then
-		mapfile -t gitignore < <(grep -v '^#' .gitignore | grep -v '^$' || true)
+	# Use `git check-ignore` for real .gitignore semantics when we're inside a
+	# git work tree. Outside a git repo, .gitignore is not honored.
+	local use_git_check=false
+	if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+		use_git_check=true
 	fi
 	shopt -s nullglob
 	for dir in */; do
@@ -157,10 +159,10 @@ get_services() {
 		[ -d "$dir" ] || continue
 		# skip symlinks
 		[ -L "$dir" ] && continue
-		# skip .gitignore entries (simple literal prefix matching only; full gitignore glob syntax is not supported)
-		for ignore in "${gitignore[@]}"; do
-			[[ "$dir" == "$ignore"* ]] && continue 2
-		done
+		# skip ignored directories (full gitignore semantics via `git check-ignore`)
+		if $use_git_check && git check-ignore --quiet "${dir%/}" 2>/dev/null; then
+			continue
+		fi
 		# skip if .git exists in the folder
 		[ -d "$dir/.git" ] && continue
 		# must have a Compose file (v1 or v2 default filename)
