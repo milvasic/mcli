@@ -146,6 +146,10 @@ Completions cover all commands and, for commands that operate on services, dynam
 
 ## Changelog
 
+### 0.10.5
+
+- `start`, `stop`, `pull`, `backup`, and `restore` now invoke `docker compose`, `tar`, and `find` as argv arrays instead of building shell strings and `eval`-ing them, so service directory names containing shell metacharacters (`"`, `$`, backtick, `;`) are handled safely; `--dry-run` output is rendered via `printf %q` so it remains copy-pasteable
+
 ### 0.10.3
 
 - `mcli restore <service>` picker now distinguishes pre-restore snapshots from regular backups: regular archives are listed first, then pre-restore archives tagged `[pre-restore] <name>`, so identically-named files in `.bkp/<service>/` and `.bkp/<service>/pre-restore/` are no longer indistinguishable
