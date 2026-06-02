@@ -2,7 +2,7 @@
 
 ## Overview
 
-`mcli` is a single-file Bash CLI (`./mcli`) for managing Docker Compose services. Each service is a subdirectory containing a `docker-compose.yml` or `docker-compose.yaml`.
+`mcli` is a single-file Bash CLI (`./mcli`) for managing Docker Compose services. Each service is a subdirectory containing a Compose file: `docker-compose.yml`, `docker-compose.yaml`, `compose.yml`, or `compose.yaml`.
 
 A companion `install.sh` handles installation, upgrades, and uninstallation of `mcli` to `/usr/local/bin`. The `update` command in `mcli` invokes it directly via `curl`.
 
