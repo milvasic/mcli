@@ -572,12 +572,20 @@ backup() {
 		dry_run_log "mkdir -p \"${bkp_dir}\" && sudo tar czf \"${dest}\" -C \"${service}\" . -C \"\$(mktemp -d)\" image.txt"
 	else
 		mkdir -p "$bkp_dir"
+		# Install the cleanup trap before claiming the slot so a Ctrl-C between
+		# the noclobber claim and the trap install can't orphan a placeholder.
+		# Guarded by $claimed/$tmp_dir so the trap is a no-op until each resource
+		# actually exists.
+		local claimed=""
+		local tmp_dir=""
+		trap '[[ -n "$claimed" ]] && rm -f "$claimed"; [[ -n "$tmp_dir" ]] && rm -rf "$tmp_dir"' INT TERM EXIT
 		# Atomically claim the destination using noclobber; retry with incrementing counter on collision
 		local counter=1
 		if ! ( set -C; : > "$dest" ) 2>/dev/null; then
 			while ! ( set -C; : > "${base}.${counter}.tar.gz" ) 2>/dev/null; do
 				((counter++))
 				if [ "$counter" -ge "$max_attempts" ]; then
+					trap - INT TERM EXIT
 					error "Could not claim a backup slot after ${max_attempts} attempts"
 					if ! $live; then
 						log "Restarting ${CYAN}${service}${RESET} after failed backup"
@@ -588,15 +596,14 @@ backup() {
 			done
 			dest="${base}.${counter}.tar.gz"
 		fi
+		claimed="$dest"
 		log "Backing up ${CYAN}${service}${RESET} to ${dest}"
-		local tmp_dir
 		tmp_dir=$(mktemp -d)
 		if [[ ${#image_lines[@]} -gt 0 ]]; then
 			printf '%s\n' "${image_lines[@]}" > "$tmp_dir/image.txt"
 		else
 			> "$tmp_dir/image.txt"
 		fi
-		trap 'rm -f "$dest"; rm -rf "$tmp_dir"' INT TERM EXIT
 		if ! sudo tar czf "${dest}" -C "${service}" . -C "$tmp_dir" image.txt; then
 			trap - INT TERM EXIT
 			error "Backup of ${CYAN}${service}${RESET} failed"
@@ -609,6 +616,8 @@ backup() {
 			return 1
 		fi
 		rm -rf "$tmp_dir"
+		tmp_dir=""
+		claimed=""
 		trap - INT TERM EXIT
 		ok "Backup created: ${dest}"
 	fi
