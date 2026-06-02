@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.10.2"
+VERSION="0.10.3"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -449,20 +449,13 @@ capture_image_info() {
 	fi
 
 	if [[ ${#lines[@]} -eq 0 ]]; then
-		local compose_file=""
-		if [[ -f "$service/docker-compose.yml" ]]; then
-			compose_file="$service/docker-compose.yml"
-		elif [[ -f "$service/docker-compose.yaml" ]]; then
-			compose_file="$service/docker-compose.yaml"
-		fi
-		if [[ -n "$compose_file" ]]; then
-			while IFS= read -r line; do
-				if [[ "$line" =~ ^[[:space:]]*image:[[:space:]]*(.+)[[:space:]]*$ ]]; then
-					local raw_img="${BASH_REMATCH[1]}"
-					raw_img="${raw_img%"${raw_img##*[^[:space:]]}"}"
-					lines+=("$raw_img")
-				fi
-			done < "$compose_file"
+		local images
+		images=$(docker compose --project-directory "$service" config --images 2>/dev/null) || true
+		if [[ -n "$images" ]]; then
+			while IFS= read -r img; do
+				[[ -z "$img" ]] && continue
+				lines+=("$img")
+			done <<< "$images"
 		fi
 	fi
 
