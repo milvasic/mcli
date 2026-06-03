@@ -156,7 +156,11 @@ migrate_disabled_config() {
 	done <"$cf"
 	$rewrote || return 0
 	declare -A seen=()
-	{
+	# Write to a sibling temp file and rename, so a crash mid-write cannot
+	# truncate $cf and silently re-enable every disabled service.
+	local tmp_cf
+	tmp_cf=$(mktemp "$(dirname "$cf")/disabled.XXXXXX")
+	if ! {
 		for line in "${out[@]}"; do
 			if [[ -z "$line" ]]; then
 				printf '\n'
@@ -165,7 +169,11 @@ migrate_disabled_config() {
 				printf '%s\n' "$line"
 			fi
 		done
-	} >"$cf"
+	} >"$tmp_cf"; then
+		rm -f "$tmp_cf"
+		return 1
+	fi
+	mv "$tmp_cf" "$cf"
 }
 
 get_disabled_services() {
@@ -237,6 +245,9 @@ get_services() {
 
 # Filter services by arguments (if any), excluding disabled services unless --all
 filter_services() {
+	local cf
+	cf=$(config_file)
+	[ -f "$cf" ] && migrate_disabled_config "$cf" "$(canonical_pwd)"
 	local all_services=()
 	mapfile -t all_services < <(get_services)
 	local disabled_services=()
@@ -288,6 +299,9 @@ filter_services() {
 
 # ── List command ──────────────────────────────────────────────────────────────
 list() {
+	local cf
+	cf=$(config_file)
+	[ -f "$cf" ] && migrate_disabled_config "$cf" "$(canonical_pwd)"
 	log "Discovered services:"
 	local services=()
 	mapfile -t services < <(get_services)
