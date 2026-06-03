@@ -148,32 +148,44 @@ is_service_disabled() {
 get_services() {
 	local services=()
 	# Use `git check-ignore` for real .gitignore semantics when we're inside a
-	# git work tree. Outside a git repo, .gitignore is not honored.
+	# git work tree. Outside a git repo, .gitignore is not honored. `git rev-parse
+	# --is-inside-work-tree` exits 0 in bare repos too, so check the printed value.
 	local use_git_check=false
-	if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+	if command -v git >/dev/null 2>&1 && [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
 		use_git_check=true
 	fi
+	local candidates=()
 	shopt -s nullglob
 	for dir in */; do
 		# skip if not a directory
 		[ -d "$dir" ] || continue
 		# skip symlinks
 		[ -L "$dir" ] && continue
-		# skip ignored directories (full gitignore semantics via `git check-ignore`)
-		if $use_git_check && git check-ignore --quiet "${dir%/}" 2>/dev/null; then
-			continue
-		fi
 		# skip if .git exists in the folder
 		[ -d "$dir/.git" ] && continue
 		# must have a Compose file (v1 or v2 default filename)
 		for name in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
 			if [ -f "$dir/$name" ]; then
-				services+=("${dir%/}")
+				candidates+=("${dir%/}")
 				break
 			fi
 		done
 	done
 	shopt -u nullglob
+	# Bulk-filter ignored candidates in a single `git check-ignore` process
+	# instead of one process per directory.
+	local -A ignored=()
+	if $use_git_check && [ ${#candidates[@]} -gt 0 ]; then
+		local ign
+		while IFS= read -r ign; do
+			ignored["$ign"]=1
+		done < <(printf '%s\n' "${candidates[@]}" | git check-ignore --stdin 2>/dev/null)
+	fi
+	local c
+	for c in "${candidates[@]}"; do
+		[[ -n "${ignored[$c]:-}" ]] && continue
+		services+=("$c")
+	done
 	[[ ${#services[@]} -gt 0 ]] && printf '%s\n' "${services[@]}"
 }
 
