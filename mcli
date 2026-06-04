@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.12.0"
+VERSION="0.13.0"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -27,6 +27,7 @@ Commands:
   backup size               # Show disk space used by backups
   backup prune              # Prune old backups by count and/or age; see --keep, --older-than, --service
   restore <service>         # Restore service from a backup archive in .bkp/<service>/
+  restore --all             # Restore every enabled service in turn; interactive picker per service
   disable <services..>      # Disable one or more services (excluded from start/stop/restart/pull)
   enable <services..>       # Re-enable one or more previously disabled services
   update                    # Update mcli to the latest version
@@ -38,8 +39,8 @@ Options:
   --dry-run                 # Print commands that would be executed, but do not run them
                             #   (applicable to: create-network, start, stop, restart, pull, backup, restore, update)
                             #   (can appear anywhere after the command)
-  --all                     # Include disabled services in start/stop/restart/pull; back up every enabled service for backup
-                            #   (applicable to: start, stop, restart, pull, backup)
+  --all                     # Include disabled services in start/stop/restart/pull; loop over all enabled services for backup/restore
+                            #   (applicable to: start, stop, restart, pull, backup, restore)
                             #   (can appear anywhere after the command)
   --live                    # Skip stop/start around backup; back up while the service is running
                             #   (applicable to: backup)
@@ -1041,16 +1042,47 @@ backup_prune() {
 
 # ── Restore command ───────────────────────────────────────────────────────────
 restore() {
+	if $include_all; then
+		if [ $# -gt 0 ]; then
+			error "Cannot combine --all with service names"
+			return 1
+		fi
+		local services_output
+		services_output=$(filter_services) || return 1
+		local services=()
+		[[ -n "$services_output" ]] && mapfile -t services <<<"$services_output"
+		if [ ${#services[@]} -eq 0 ]; then
+			error "No services to restore"
+			return 1
+		fi
+		local failed=()
+		for svc in "${services[@]}"; do
+			if ! restore_one "$svc"; then
+				failed+=("$svc")
+			fi
+		done
+		if [ ${#failed[@]} -gt 0 ]; then
+			error "Restore failed for: ${CYAN}${failed[*]}${RESET}"
+			return 1
+		fi
+		return 0
+	fi
+
 	if [ $# -ne 1 ]; then
 		error "Usage: mcli restore <service>"
+		error "       mcli restore --all"
 		return 1
 	fi
 	local service="$1"
-
 	if ! is_known_service "$service"; then
 		error "Unknown service: ${CYAN}${service}${RESET}"
 		return 1
 	fi
+	restore_one "$service"
+}
+
+restore_one() {
+	local service="$1"
 
 	local bkp_dir=".bkp/${service}"
 
@@ -1230,8 +1262,11 @@ _mcli() {
 	start | stop | restart | pull)
 		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run --all" -- "$cur"))
 		;;
-	disable | enable | restore)
+	disable | enable)
 		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run" -- "$cur"))
+		;;
+	restore)
+		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run --all" -- "$cur"))
 		;;
 	backup)
 		COMPREPLY=($(compgen -W "size prune $(__mcli_services) --dry-run --live --all --keep --older-than --service" -- "$cur"))
@@ -1288,9 +1323,13 @@ _mcli() {
 		compadd -a services
 		compadd -- --dry-run --all
 		;;
-	disable | enable | restore)
+	disable | enable)
 		compadd -a services
 		compadd -- --dry-run
+		;;
+	restore)
+		compadd -a services
+		compadd -- --dry-run --all
 		;;
 	backup)
 		compadd -- size prune
