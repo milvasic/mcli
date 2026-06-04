@@ -1,7 +1,12 @@
 setup() {
   DIR="$( cd "$( dirname "$BATS_TEST_FILENAME" )" >/dev/null 2>&1 && pwd )"
   MCLI="$DIR/../mcli"
-  export XDG_CONFIG_HOME="$(mktemp -d)"
+  TMPDIR_ROOT=$(mktemp -d)
+  export XDG_CONFIG_HOME="$TMPDIR_ROOT"
+}
+
+teardown() {
+  rm -rf "$TMPDIR_ROOT"
 }
 
 @test "help exits non-zero and prints usage" {
