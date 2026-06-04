@@ -62,6 +62,8 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | `version`, `--version`, `-v`                    | Print version                                                                                                                                                                                  |
 | `help`, `--help`, `-h`                          | Show help message                                                                                                                                                                              |
 
+> **Note:** `stop` and `restart` run `docker compose down --remove-orphans`, which removes any containers attached to the same Compose project that aren't declared in the current compose file. If you've manually added sidecar containers (debugging shells, ad-hoc tools), they will be removed too.
+
 ### Options
 
 | Option                                        | Description                                                                                                                                                                                                                        |
