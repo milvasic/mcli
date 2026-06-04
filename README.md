@@ -40,7 +40,7 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | ---------------------------- | -------------------------------------------------------------------- |
 | `list`                       | List discovered services (disabled services are marked)              |
 | `create-network`             | Ensure the shared `services` Docker bridge network exists            |
-| `start [services..]`         | Start all or specified services (skips disabled)                     |
+| `start [services..]`         | Start all or specified services (skips disabled); polls containers after `up -d` to catch crash-loops |
 | `stop [services..]`          | Stop all or specified services, removing orphans (skips disabled)    |
 | `restart [services..]`       | Restart all or specified services (skips disabled)                   |
 | `pull [services..]`          | Pull latest images, skipping buildable services (skips disabled)     |
@@ -65,6 +65,8 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--dry-run` | Print the commands that would be executed without running them (applies to: `create-network`, `start`, `stop`, `restart`, `pull`, `backup`, `restore`, `update`) |
 | `--check`   | Check if an update is available without installing; only valid for `update` |
+| `--no-health` | Skip post-start container health polling (applies to: `start`, `restart`) |
+| `--health-timeout N` | Seconds to poll for running state after `docker compose up -d`; default `15` (applies to: `start`, `restart`) |
 | `--all`     | Include disabled services in `start`/`stop`/`restart`/`pull`; loop over all services (including disabled) for `backup`/`restore` (applies to: `start`, `stop`, `restart`, `pull`, `backup`, `restore`) |
 | `--live`    | Skip stop/start around backup; back up while the service is running (applies to: `backup`)                                                   |
 | `--keep N`  | After a successful backup, prune oldest archives until at most `N` remain per service. Also accepted by `backup prune`. Pre-restore archives are not counted or pruned. |
@@ -190,6 +192,13 @@ source <(mcli completions zsh)
 Completions cover all commands and, for commands that operate on services, dynamically suggest discovered service names.
 
 ## Changelog
+
+### 0.15.0
+
+- `mcli start` (and `mcli restart`) now poll container states for up to 15 seconds after `docker compose up -d` to detect crash-loops that Compose itself misses (exit 0 is returned even when containers immediately restart or exit)
+- Containers in `restarting`, `exited`, or `dead` state are treated as a start failure; the service is added to the failed list and `mcli` exits non-zero
+- `--no-health`: skip the post-start poll entirely (preserves the previous behavior)
+- `--health-timeout N`: override the default 15-second polling window
 
 ### 0.14.0
 
