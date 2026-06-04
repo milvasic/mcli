@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.17.0"
+VERSION="0.18.0"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -15,6 +15,7 @@ Usage: mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 
 Commands:
   list                      # List discovered services (disabled services are marked)
+                            #   --json: JSON array output; --plain: one name per line
   create-network            # Ensure the 'services' Docker bridge network exists
   start [services..]        # Start all or specified services (skips disabled); polls containers for up to 15s after up -d to catch crash-loops (see --no-health, --health-timeout)
   stop [services..]         # Stop all or specified services (skips disabled)
@@ -74,12 +75,16 @@ Options:
                             #   (applicable to: restore; mutually exclusive with --no-pre-restore)
   --no-pre-restore          # Skip the pre-restore snapshot entirely (do not prompt, do not create)
                             #   (applicable to: restore; mutually exclusive with --yes)
+  --json                    # Output in JSON format (machine-readable)
+                             #   (applicable to: list, backup size)
+  --plain                   # Output in plain text (one item per line, no decoration)
+                             #   (applicable to: list)
   --follow, -f              # Follow log output (like tail -f)
-                            #   (applicable to: logs)
+                             #   (applicable to: logs)
   --tail N                  # Show N lines from the end of the logs (default: all)
-                            #   (applicable to: logs)
+                             #   (applicable to: logs)
   --check                   # Check if an update is available without installing
-                            #   (applicable to: update)
+                             #   (applicable to: update)
 
 Service discovery:
   - Each service is an immediate subfolder containing a docker compose file (docker-compose.yml, docker-compose.yaml, compose.yml, or compose.yaml)
@@ -127,6 +132,14 @@ log() { printf "\n${BOLD}=== %s ===${RESET}\n" "$1" >&2; }
 dry_run_log() { printf "${YELLOW}[dry-run]${RESET} %s\n" "$1" >&2; }
 error() { printf "${RED}ERROR:${RESET} %s\n" "$1" >&2; }
 ok() { printf "${GREEN}%s${RESET}\n" "$1"; }
+
+# Escape a string for safe inclusion in JSON output.
+json_escape() {
+	local s="$1"
+	s="${s//\\/\\\\}"
+	s="${s//\"/\\\"}"
+	printf '%s' "$s"
+}
 
 # Render argv as a shell-safe, copy-pasteable command string for dry-run logs.
 print_cmd() {
@@ -397,49 +410,79 @@ list() {
 	local cf
 	cf=$(config_file)
 	[ -f "$cf" ] && migrate_disabled_config "$cf" "$(canonical_pwd)"
-	log "Discovered services:"
+
 	local services=()
 	local order_f
 	order_f=$(order_file)
+
 	if [ -f "$order_f" ]; then
-		# Order file present: show all services interleaved in file/discovery order
 		mapfile -t services < <(get_services | apply_order)
-		if [[ ${#services[@]} -eq 0 ]]; then
-			echo "  (none found)"
-		else
-			for service in "${services[@]}"; do
-				if is_service_disabled "$service"; then
-					printf "  ${CYAN}%s${RESET} ${YELLOW}(disabled)${RESET}\n" "$service"
-				else
-					printf "  ${CYAN}%s${RESET}\n" "$service"
-				fi
-			done
-		fi
 	else
-		# No order file: preserve original behavior — enabled first (alpha), disabled last (alpha)
 		mapfile -t services < <(get_services)
-		if [[ ${#services[@]} -eq 0 ]]; then
-			echo "  (none found)"
-		else
-			local enabled=() disabled=()
-			for service in "${services[@]}"; do
-				if is_service_disabled "$service"; then
-					disabled+=("$service")
-				else
-					enabled+=("$service")
-				fi
-			done
-			local sorted_enabled=() sorted_disabled=()
-			[ ${#enabled[@]} -gt 0 ] && mapfile -t sorted_enabled < <(printf '%s\n' "${enabled[@]}" | sort)
-			[ ${#disabled[@]} -gt 0 ] && mapfile -t sorted_disabled < <(printf '%s\n' "${disabled[@]}" | sort)
-			for service in "${sorted_enabled[@]}"; do
-				printf "  ${CYAN}%s${RESET}\n" "$service"
-			done
-			for service in "${sorted_disabled[@]}"; do
-				printf "  ${CYAN}%s${RESET} ${YELLOW}(disabled)${RESET}\n" "$service"
-			done
-		fi
 	fi
+
+	if [[ ${#services[@]} -eq 0 ]]; then
+		if $output_json; then
+			echo "[]"
+		elif $output_plain; then
+			:
+		else
+			log "Discovered services:"
+			echo "  (none found)"
+		fi
+		return 0
+	fi
+
+	# Build the ordered list (same ordering as the normal colour output)
+	if [ ! -f "$order_f" ]; then
+		local enabled=() disabled=()
+		for service in "${services[@]}"; do
+			if is_service_disabled "$service"; then
+				disabled+=("$service")
+			else
+				enabled+=("$service")
+			fi
+		done
+		local sorted_enabled=() sorted_disabled=()
+		[ ${#enabled[@]} -gt 0 ] && mapfile -t sorted_enabled < <(printf '%s\n' "${enabled[@]}" | sort)
+		[ ${#disabled[@]} -gt 0 ] && mapfile -t sorted_disabled < <(printf '%s\n' "${disabled[@]}" | sort)
+		services=("${sorted_enabled[@]}" "${sorted_disabled[@]}")
+	fi
+
+	# --json output
+	if $output_json; then
+		local first=true
+		printf '['
+		for service in "${services[@]}"; do
+			$first || printf ','
+			first=false
+			if is_service_disabled "$service"; then
+				printf '{"name":"%s","enabled":false}' "$(json_escape "$service")"
+			else
+				printf '{"name":"%s","enabled":true}' "$(json_escape "$service")"
+			fi
+		done
+		printf ']\n'
+		return 0
+	fi
+
+	# --plain output
+	if $output_plain; then
+		for service in "${services[@]}"; do
+			echo "$service"
+		done
+		return 0
+	fi
+
+	# Normal colour output
+	log "Discovered services:"
+	for service in "${services[@]}"; do
+		if is_service_disabled "$service"; then
+			printf "  ${CYAN}%s${RESET} ${YELLOW}(disabled)${RESET}\n" "$service"
+		else
+			printf "  ${CYAN}%s${RESET}\n" "$service"
+		fi
+	done
 }
 
 # ── Core commands ───────────────────────────────────────────────────────────────────
@@ -893,12 +936,15 @@ apply_older_than_retention() {
 backup_size() {
 	local bkp_root=".bkp"
 	if [ ! -d "$bkp_root" ]; then
-		ok "No backups found (.bkp does not exist)"
+		if $output_json; then
+			printf '{"per_service":{},"total":"0"}\n'
+		else
+			ok "No backups found (.bkp does not exist)"
+		fi
 		return 0
 	fi
-	log "Backup disk usage"
+
 	local found=false
-	local max_width=5  # at least len("total")
 	local -a names sizes
 	local err_file
 	err_file=$(mktemp)
@@ -911,15 +957,40 @@ backup_size() {
 		name="${name%/}"
 		names+=("$name")
 		sizes+=("$size")
-		if (( ${#name} > max_width )); then max_width=${#name}; fi
 	done
 	shopt -u nullglob
+
 	if ! $found; then
 		rm -f "$err_file"
-		ok "No backups found"
+		if $output_json; then
+			printf '{"per_service":{},"total":"0"}\n'
+		else
+			ok "No backups found"
+		fi
 		return 0
 	fi
+
+	if $output_json; then
+		local total
+		total=$(du -sh "$bkp_root" 2>>"$err_file" | cut -f1) || true
+		printf '{"per_service":{'
+		local first=true i
+		for i in "${!names[@]}"; do
+			$first || printf ','
+			first=false
+			printf '"%s":"%s"' "$(json_escape "${names[$i]}")" "$(json_escape "${sizes[$i]}")"
+		done
+		printf '},"total":"%s"}\n' "$(json_escape "$total")"
+		rm -f "$err_file"
+		return 0
+	fi
+
+	log "Backup disk usage"
+	local max_width=5
 	local i
+	for i in "${!names[@]}"; do
+		if (( ${#names[$i]} > max_width )); then max_width=${#names[$i]}; fi
+	done
 	for i in "${!names[@]}"; do
 		printf "  ${CYAN}%-*s${RESET}  %s\n" "$max_width" "${names[$i]}" "${sizes[$i]}"
 	done
@@ -934,6 +1005,11 @@ backup_size() {
 }
 
 backup() {
+	if $output_json && ! { [ $# -eq 1 ] && [ "$1" = "size" ] && ! is_known_service "size"; }; then
+		error "--json is only valid for 'backup size'"
+		return 1
+	fi
+
 	if [ $# -eq 1 ] && [ "$1" = "size" ] && ! is_known_service "size"; then
 		backup_size
 		return 0
@@ -1490,6 +1566,9 @@ _mcli() {
 	fi
 
 	case "$command" in
+	list)
+		COMPREPLY=($(compgen -W "--json --plain" -- "$cur"))
+		;;
 	start | restart)
 		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run --all --no-health --health-timeout" -- "$cur"))
 		;;
@@ -1512,7 +1591,7 @@ _mcli() {
 		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run --all --backup --yes --no-pre-restore" -- "$cur"))
 		;;
 	backup)
-		COMPREPLY=($(compgen -W "size prune $(__mcli_services) --dry-run --live --all --keep --older-than --service" -- "$cur"))
+		COMPREPLY=($(compgen -W "size prune $(__mcli_services) --dry-run --json --live --all --keep --older-than --service" -- "$cur"))
 		;;
 	completions)
 		COMPREPLY=($(compgen -W "bash zsh" -- "$cur"))
@@ -1589,10 +1668,13 @@ _mcli() {
 		compadd -a services
 		compadd -- --dry-run --all --backup --yes --no-pre-restore
 		;;
+	list)
+		compadd -- --json --plain
+		;;
 	backup)
 		compadd -- size prune
 		compadd -a services
-		compadd -- --dry-run --live --all --keep --older-than --service
+		compadd -- --dry-run --json --live --all --keep --older-than --service
 		;;
 	completions)
 		compadd -- bash zsh
@@ -1702,6 +1784,8 @@ keep_count=""
 older_than=""
 prune_service=""
 check_only=false
+output_json=false
+output_plain=false
 follow=false
 tail_count=""
 no_health=false
@@ -1751,6 +1835,14 @@ while [[ $# -gt 0 ]]; do
 		fi
 		prune_service="$2"
 		shift 2
+		;;
+	--json)
+		output_json=true
+		shift
+		;;
+	--plain)
+		output_plain=true
+		shift
 		;;
 	--follow | -f)
 		follow=true
@@ -1845,13 +1937,28 @@ if $no_health && $health_timeout_set; then
 	printf "${YELLOW}warning:${RESET} --health-timeout has no effect when --no-health is set\n" >&2
 fi
 
+if $output_json && $output_plain; then
+	error "--json and --plain are mutually exclusive"
+	exit 1
+fi
+
+if $output_json && [[ "${COMMAND}" != "list" && "${COMMAND}" != "backup" ]]; then
+	error "--json is only valid for 'list' and 'backup'"
+	exit 1
+fi
+
+if $output_plain && [[ "${COMMAND}" != "list" ]]; then
+	error "--plain is only valid for 'list'"
+	exit 1
+fi
+
 if ($follow || [[ -n "$tail_count" ]]) && [[ "${COMMAND}" != "logs" ]]; then
 	error "--follow and --tail are only valid for 'logs'"
 	exit 1
 fi
 
 case "${COMMAND}" in
-list) list ;;
+	list) list ;;
 create-network) create_network ;;
 start) start "${service_args[@]}" ;;
 stop) stop "${service_args[@]}" ;;

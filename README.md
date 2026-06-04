@@ -38,7 +38,7 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 
 | Command                                         | Description                                                                                                                                                                                    |
 | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `list`                                          | List discovered services (disabled services are marked)                                                                                                                                        |
+| `list [--json\|--plain]`                        | List discovered services (disabled services are marked). `--json` outputs a JSON array; `--plain` prints one name per line.                                                                    |
 | `create-network`                                | Ensure the shared `services` Docker bridge network exists                                                                                                                                      |
 | `start [services..]`                            | Start all or specified services (skips disabled); polls containers after `up -d` to catch crash-loops                                                                                          |
 | `stop [services..]`                             | Stop all or specified services, removing orphans (skips disabled)                                                                                                                              |
@@ -50,7 +50,7 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | `backup <service>`                              | Stop service, back up to `.bkp/<service>/<date>[.<counter>].tar.gz`, restart service. Archive includes `image.txt` with container image digests.                                               |
 | `backup <service> --live`                       | Back up without stopping (live backup)                                                                                                                                                         |
 | `backup --all`                                  | Back up every enabled service in turn                                                                                                                                                          |
-| `backup size`                                   | Show disk space used by all backups under `.bkp/`                                                                                                                                              |
+| `backup size [--json]`                          | Show disk space used by all backups under `.bkp/`. `--json` outputs a JSON object.                                                                                                             |
 | `backup prune`                                  | Prune old backups by count (`--keep N`) and/or age (`--older-than DUR`); optionally scoped with `--service NAME`. Pre-restore archives under `pre-restore/` are not pruned.                    |
 | `restore <service>`                             | Restore service from a backup archive in `.bkp/<service>/`; interactive picker when multiple backups exist. Wipes the service dir before extraction so its contents match the archive exactly. |
 | `restore <service> --backup <name>`             | Restore from a specific archive (exact filename, with or without `.tar.gz`) found under `.bkp/<service>/` or `.bkp/<service>/pre-restore/`.                                                    |
@@ -76,6 +76,8 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | `--no-health`                                 | Skip post-start container health polling (applies to: `start`, `restart`)                                                                                                                                                                       |
 | `--health-timeout N`                          | Seconds to poll for running state after `docker compose up -d`; default `15` (applies to: `start`, `restart`)                                                                                                                                   |
 | `--all`                                       | Include disabled services in `start`/`stop`/`restart`/`pull`/`logs`/`ps`/`exec`; loop over all services (including disabled) for `backup`/`restore` (applies to: `start`, `stop`, `restart`, `pull`, `backup`, `restore`, `logs`, `ps`, `exec`) |
+| `--json`                                      | Output data in JSON format — machine-readable (applies to: `list`, `backup size`)                                                                                                                                                               |
+| `--plain`                                     | Output data in plain text — one item per line, no decoration (applies to: `list`)                                                                                                                                                               |
 | `--follow, -f`                                | Follow log output (like `tail -f`); only valid for `logs`                                                                                                                                                                                       |
 | `--tail N`                                    | Show N lines from the end of the logs; only valid for `logs`                                                                                                                                                                                    |
 | `--live`                                      | Skip stop/start around backup; back up while the service is running (applies to: `backup`)                                                                                                                                                      |
@@ -123,6 +125,15 @@ mcli backup my-service --live
 
 # Show disk space used by all backups
 mcli backup size
+
+# List services as JSON array (machine-readable)
+mcli list --json
+
+# List services in plain text (one per line, for scripts)
+mcli list --plain
+
+# Show backup disk usage as JSON
+mcli backup size --json
 
 # Back up every enabled service, keeping only the 5 newest archives per service
 mcli backup --all --keep 5
@@ -235,6 +246,12 @@ source <(mcli completions zsh)
 Completions cover all commands and, for commands that operate on services, dynamically suggest discovered service names.
 
 ## Changelog
+
+### 0.18.0
+
+- Added `--json` flag to `list` and `backup size` for machine-readable JSON output (stdout only; status messages remain on stderr)
+- Added `--plain` flag to `list` for one-service-per-line output with no decoration
+- `--json` and `--plain` are mutually exclusive; each is validated against the command it is used with
 
 ### 0.17.0
 
