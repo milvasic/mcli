@@ -46,7 +46,9 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | `pull [services..]`          | Pull latest images, skipping buildable services (skips disabled)     |
 | `backup <service>`           | Stop service, back up to `.bkp/<service>/<date>[.<counter>].tar.gz`, restart service. Archive includes `image.txt` with container image digests. |
 | `backup <service> --live`    | Back up without stopping (live backup)                               |
+| `backup --all`               | Back up every enabled service in turn                                |
 | `backup size`                | Show disk space used by all backups under `.bkp/`                   |
+| `backup prune`               | Prune old backups by count (`--keep N`) and/or age (`--older-than DUR`); optionally scoped with `--service NAME`. Pre-restore archives under `pre-restore/` are not pruned. |
 | `restore <service>`          | Restore service from a backup archive in `.bkp/<service>/`; interactive picker when multiple backups exist. Wipes the service dir before extraction so its contents match the archive exactly. |
 | `disable <services..>`       | Disable one or more services (excluded from start/stop/restart/pull) |
 | `enable <services..>`        | Re-enable one or more previously disabled services                   |
@@ -60,10 +62,13 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | Option      | Description                                                                                                                                 |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--dry-run` | Print the commands that would be executed without running them (applies to: `create-network`, `start`, `stop`, `restart`, `pull`, `backup`, `restore`, `update`) |
-| `--all`     | Include disabled services in start/stop/restart/pull (applies to: `start`, `stop`, `restart`, `pull`)                                       |
+| `--all`     | Include disabled services in start/stop/restart/pull; back up every enabled service for `backup` (applies to: `start`, `stop`, `restart`, `pull`, `backup`) |
 | `--live`    | Skip stop/start around backup; back up while the service is running (applies to: `backup`)                                                   |
+| `--keep N`  | After a successful backup, prune oldest archives until at most `N` remain per service. Also accepted by `backup prune`. Pre-restore archives are not counted or pruned. |
+| `--older-than DUR` | For `backup prune`: delete archives older than `DUR`. `DUR` is `<N><unit>` with unit one of `s`, `m` (minutes), `h`, `d`, `w` — e.g. `30d`, `12h`, `2w`. |
+| `--service NAME` | For `backup prune`: restrict pruning to a single service.                                                            |
 
-`--dry-run`, `--all`, and `--live` can appear anywhere after the command.
+All options can appear anywhere after the command.
 
 ### Examples
 
@@ -100,6 +105,21 @@ mcli backup my-service --live
 
 # Show disk space used by all backups
 mcli backup size
+
+# Back up every enabled service, keeping only the 5 newest archives per service
+mcli backup --all --keep 5
+
+# Back up a single service and prune anything older than 30 days afterwards
+mcli backup my-service --keep 5
+
+# Standalone prune: drop archives older than 30 days across every service
+mcli backup prune --older-than 30d
+
+# Standalone prune: keep only the 3 newest archives for one service
+mcli backup prune --service my-service --keep 3
+
+# Preview what prune would delete without touching disk
+mcli backup prune --keep 5 --dry-run
 
 # Restore a service from a backup (interactive picker when multiple backups exist)
 mcli restore my-service
@@ -145,6 +165,13 @@ source <(mcli completions zsh)
 Completions cover all commands and, for commands that operate on services, dynamically suggest discovered service names.
 
 ## Changelog
+
+### 0.11.0
+
+- Added backup retention: `mcli backup <service> --keep N` (and `mcli backup --all --keep N`) prunes the oldest archives for each service after a successful backup, so `.bkp/` no longer grows unboundedly
+- Added `mcli backup --all` to back up every enabled service in turn
+- Added `mcli backup prune` standalone subcommand with `--keep N`, `--older-than DUR` (`Nd`/`Nh`/`Nw`/`Nm`/`Ns`), and optional `--service NAME` scoping; respects `--dry-run` and prints exactly which archives would be deleted
+- Pre-restore archives under `.bkp/<service>/pre-restore/` are intentionally excluded from both `--keep` counting and `--older-than` deletion, so safety snapshots taken before a restore are never silently removed
 
 ### 0.10.7
 

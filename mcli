@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.10.7"
+VERSION="0.11.0"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -23,7 +23,9 @@ Commands:
   backup <service>          # Stop service, back up to .bkp/<service>/<date>[.<counter>].tar.gz, restart service
                             #   Archive includes image.txt with container image digests
   backup <service> --live   # Back up without stopping (live backup)
+  backup --all              # Back up every enabled service in turn
   backup size               # Show disk space used by backups
+  backup prune              # Prune old backups by count and/or age; see --keep, --older-than, --service
   restore <service>         # Restore service from a backup archive in .bkp/<service>/
   disable <services..>      # Disable one or more services (excluded from start/stop/restart/pull)
   enable <services..>       # Re-enable one or more previously disabled services
@@ -36,12 +38,19 @@ Options:
   --dry-run                 # Print commands that would be executed, but do not run them
                             #   (applicable to: create-network, start, stop, restart, pull, backup, restore, update)
                             #   (can appear anywhere after the command)
-  --all                     # Include disabled services in start/stop/restart/pull
-                            #   (applicable to: start, stop, restart, pull)
+  --all                     # Include disabled services in start/stop/restart/pull; back up every enabled service for backup
+                            #   (applicable to: start, stop, restart, pull, backup)
                             #   (can appear anywhere after the command)
   --live                    # Skip stop/start around backup; back up while the service is running
                             #   (applicable to: backup)
                             #   (can appear anywhere after the command)
+  --keep N                  # After backup, prune oldest archives until at most N remain per service
+                            #   (applicable to: backup, backup prune)
+                            #   Pre-restore archives under pre-restore/ are not counted or pruned
+  --older-than DUR          # Prune archives older than DUR (e.g. 30d, 12h, 2w; units: s, m, h, d, w)
+                            #   (applicable to: backup prune)
+  --service NAME            # Restrict backup prune to a single service
+                            #   (applicable to: backup prune)
 
 Service discovery:
   - Each service is an immediate subfolder containing a docker compose file (docker-compose.yml, docker-compose.yaml, compose.yml, or compose.yaml)
@@ -547,6 +556,98 @@ capture_image_info() {
 	[[ ${#lines[@]} -gt 0 ]] && printf '%s\n' "${lines[@]}"
 }
 
+# ── Backup retention helpers ──────────────────────────────────────────────────
+# Parse "<N><unit>" into seconds. Units: s, m (minutes), h, d, w.
+parse_duration() {
+	local s="$1"
+	if [[ ! "$s" =~ ^([0-9]+)([smhdw])$ ]]; then
+		error "Invalid duration: '${s}' (expected <N><unit> with unit one of s, m, h, d, w; e.g. 30d)"
+		return 1
+	fi
+	local num="${BASH_REMATCH[1]}" unit="${BASH_REMATCH[2]}"
+	case "$unit" in
+	s) echo "$num" ;;
+	m) echo "$((num * 60))" ;;
+	h) echo "$((num * 3600))" ;;
+	d) echo "$((num * 86400))" ;;
+	w) echo "$((num * 604800))" ;;
+	esac
+}
+
+# List backup archives for a service, oldest first by mtime. Excludes the
+# pre-restore/ subdirectory so those archives are tracked separately.
+list_service_backups() {
+	local svc_dir="$1"
+	[ -d "$svc_dir" ] || return 0
+	shopt -s nullglob
+	local files=("$svc_dir"/*.tar.gz)
+	shopt -u nullglob
+	[ ${#files[@]} -eq 0 ] && return 0
+	stat -c '%Y %n' "${files[@]}" | sort -n | cut -d' ' -f2-
+}
+
+# Delete a single backup archive. Respects --dry-run. Falls back to sudo if
+# the unprivileged unlink is denied (archives are written under sudo).
+delete_backup() {
+	local f="$1"
+	if $dry_run; then
+		dry_run_log "rm -f $(printf %q "$f")"
+		return 0
+	fi
+	if rm -f "$f" 2>/dev/null; then
+		ok "Deleted: $f"
+		return 0
+	fi
+	if sudo rm -f "$f"; then
+		ok "Deleted: $f"
+		return 0
+	fi
+	error "Failed to delete: $f"
+	return 1
+}
+
+# Keep the newest $n archives for $svc; delete the rest. Pre-restore/ excluded.
+apply_keep_retention() {
+	local svc="$1" n="$2"
+	local svc_dir=".bkp/${svc}"
+	local files=()
+	mapfile -t files < <(list_service_backups "$svc_dir")
+	local total=${#files[@]}
+	if [ "$total" -le "$n" ]; then
+		return 0
+	fi
+	local to_delete=$((total - n))
+	log "Pruning ${CYAN}${svc}${RESET}: keeping ${n} of ${total} backup(s), removing ${to_delete}"
+	local i
+	for ((i = 0; i < to_delete; i++)); do
+		delete_backup "${files[$i]}" || true
+	done
+}
+
+# Delete archives for $svc with mtime older than $cutoff (epoch seconds).
+apply_older_than_retention() {
+	local svc="$1" cutoff="$2"
+	local svc_dir=".bkp/${svc}"
+	[ -d "$svc_dir" ] || return 0
+	shopt -s nullglob
+	local files=("$svc_dir"/*.tar.gz)
+	shopt -u nullglob
+	[ ${#files[@]} -eq 0 ] && return 0
+	local stale=() f mtime
+	for f in "${files[@]}"; do
+		mtime=$(stat -c '%Y' "$f" 2>/dev/null) || continue
+		if ((mtime < cutoff)); then
+			stale+=("$f")
+		fi
+	done
+	[ ${#stale[@]} -eq 0 ] && return 0
+	log "Pruning ${CYAN}${svc}${RESET}: ${#stale[@]} backup(s) older than cutoff"
+	local s
+	for s in "${stale[@]}"; do
+		delete_backup "$s" || true
+	done
+}
+
 # ── Backup command ────────────────────────────────────────────────────────────
 backup_size() {
 	local bkp_root=".bkp"
@@ -596,17 +697,62 @@ backup() {
 		backup_size
 		return 0
 	fi
-	if [ $# -ne 1 ]; then
-		error "Usage: mcli backup <service> [--live]"
+	if [ $# -ge 1 ] && [ "$1" = "prune" ] && ! is_known_service "prune"; then
+		shift
+		backup_prune "$@"
+		return $?
+	fi
+
+	# Resolve services to back up. --all picks every enabled service;
+	# otherwise a single service argument is required.
+	local services_to_backup=()
+	if $include_all; then
+		if [ $# -gt 0 ]; then
+			error "Cannot combine --all with service names"
+			return 1
+		fi
+		local services_output
+		services_output=$(filter_services) || return 1
+		[[ -n "$services_output" ]] && mapfile -t services_to_backup <<<"$services_output"
+		if [ ${#services_to_backup[@]} -eq 0 ]; then
+			error "No services to back up"
+			return 1
+		fi
+	else
+		if [ $# -ne 1 ]; then
+			error "Usage: mcli backup <service> [--live] [--keep N]"
+			error "       mcli backup --all [--live] [--keep N]"
+			error "       mcli backup size"
+			error "       mcli backup prune (--keep N | --older-than DUR) [--service NAME] [--dry-run]"
+			return 1
+		fi
+		if ! is_known_service "$1"; then
+			error "Unknown service: ${CYAN}${1}${RESET}"
+			return 1
+		fi
+		services_to_backup=("$1")
+	fi
+
+	local failed=()
+	local svc
+	for svc in "${services_to_backup[@]}"; do
+		if ! backup_one "$svc"; then
+			failed+=("$svc")
+			continue
+		fi
+		if [[ -n "$keep_count" ]]; then
+			apply_keep_retention "$svc" "$keep_count"
+		fi
+	done
+
+	if [ ${#failed[@]} -gt 0 ]; then
+		error "Backup failed for: ${CYAN}${failed[*]}${RESET}"
 		return 1
 	fi
+}
+
+backup_one() {
 	local service="$1"
-
-	if ! is_known_service "$service"; then
-		error "Unknown service: ${CYAN}${service}${RESET}"
-		return 1
-	fi
-
 	local today
 	today=$(date +%Y-%m-%d)
 	local bkp_dir=".bkp/${service}"
@@ -719,6 +865,65 @@ backup() {
 			fi
 		fi
 	fi
+}
+
+# ── Backup prune subcommand ───────────────────────────────────────────────────
+backup_prune() {
+	if [ $# -gt 0 ]; then
+		error "Unexpected argument(s) to 'backup prune': $*"
+		error "Usage: mcli backup prune (--keep N | --older-than DUR) [--service NAME] [--dry-run]"
+		return 1
+	fi
+	if [[ -z "$keep_count" && -z "$older_than" ]]; then
+		error "Usage: mcli backup prune (--keep N | --older-than DUR) [--service NAME] [--dry-run]"
+		return 1
+	fi
+
+	local bkp_root=".bkp"
+	if [ ! -d "$bkp_root" ]; then
+		ok "No backups found (.bkp does not exist)"
+		return 0
+	fi
+
+	local services=()
+	if [[ -n "$prune_service" ]]; then
+		if [ ! -d "${bkp_root}/${prune_service}" ]; then
+			error "No backups found for ${CYAN}${prune_service}${RESET} in ${bkp_root}/"
+			return 1
+		fi
+		services=("$prune_service")
+	else
+		shopt -s nullglob
+		local d name
+		for d in "${bkp_root}"/*/; do
+			name="${d#"$bkp_root"/}"
+			name="${name%/}"
+			services+=("$name")
+		done
+		shopt -u nullglob
+	fi
+
+	if [ ${#services[@]} -eq 0 ]; then
+		ok "No backups found"
+		return 0
+	fi
+
+	local cutoff=""
+	if [[ -n "$older_than" ]]; then
+		local secs
+		secs=$(parse_duration "$older_than") || return 1
+		cutoff=$(($(date +%s) - secs))
+	fi
+
+	local svc
+	for svc in "${services[@]}"; do
+		if [[ -n "$keep_count" ]]; then
+			apply_keep_retention "$svc" "$keep_count"
+		fi
+		if [[ -n "$cutoff" ]]; then
+			apply_older_than_retention "$svc" "$cutoff"
+		fi
+	done
 }
 
 # ── Restore command ───────────────────────────────────────────────────────────
@@ -916,7 +1121,7 @@ _mcli() {
 		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run" -- "$cur"))
 		;;
 	backup)
-		COMPREPLY=($(compgen -W "size $(__mcli_services) --dry-run --live" -- "$cur"))
+		COMPREPLY=($(compgen -W "size prune $(__mcli_services) --dry-run --live --all --keep --older-than --service" -- "$cur"))
 		;;
 	completions)
 		COMPREPLY=($(compgen -W "bash zsh" -- "$cur"))
@@ -975,9 +1180,9 @@ _mcli() {
 		compadd -- --dry-run
 		;;
 	backup)
-		compadd -- size
+		compadd -- size prune
 		compadd -a services
-		compadd -- --dry-run --live
+		compadd -- --dry-run --live --all --keep --older-than --service
 		;;
 	completions)
 		compadd -- bash zsh
@@ -1025,6 +1230,9 @@ service_args=()
 dry_run=false
 include_all=false
 live=false
+keep_count=""
+older_than=""
+prune_service=""
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--dry-run)
@@ -1038,6 +1246,34 @@ while [[ $# -gt 0 ]]; do
 	--live)
 		live=true
 		shift
+		;;
+	--keep)
+		if [ $# -lt 2 ]; then
+			error "Option --keep requires a non-negative integer argument"
+			exit 1
+		fi
+		if [[ ! "$2" =~ ^[0-9]+$ ]]; then
+			error "Option --keep requires a non-negative integer (got: $2)"
+			exit 1
+		fi
+		keep_count="$2"
+		shift 2
+		;;
+	--older-than)
+		if [ $# -lt 2 ]; then
+			error "Option --older-than requires a duration argument (e.g. 30d)"
+			exit 1
+		fi
+		older_than="$2"
+		shift 2
+		;;
+	--service)
+		if [ $# -lt 2 ]; then
+			error "Option --service requires a service name"
+			exit 1
+		fi
+		prune_service="$2"
+		shift 2
 		;;
 	-*)
 		error "Unknown option: $1"
