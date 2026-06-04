@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.11.0"
+VERSION="0.12.0"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -58,6 +58,9 @@ Service discovery:
 
 Configuration:
   Disabled services are stored in ${XDG_CONFIG_HOME:-~/.config}/mcli/disabled
+  Service start/stop order is read from .mcli/order (one service name per line; # comments allowed)
+    Services listed in the file start in that order; unlisted services follow in discovery order
+    stop always runs in reverse start order
 
 Shell completions:
   # Bash (add to ~/.bashrc):
@@ -129,6 +132,10 @@ colorize() {
 # ── Configuration ─────────────────────────────────────────────────────────────
 config_file() {
 	echo "${XDG_CONFIG_HOME:-$HOME/.config}/mcli/disabled"
+}
+
+order_file() {
+	echo ".mcli/order"
 }
 
 # Canonical path of $PWD. Falls back through readlink → realpath → pwd so
@@ -252,6 +259,52 @@ get_services() {
 	[[ ${#services[@]} -gt 0 ]] && printf '%s\n' "${services[@]}"
 }
 
+# Reorder services (one per line on stdin) according to .mcli/order.
+# Services named in the file come first in file order; the rest follow in their
+# original (discovery) order. Lines starting with # and blank lines are ignored.
+apply_order() {
+	local order_f
+	order_f=$(order_file)
+
+	local input=()
+	mapfile -t input
+	[ ${#input[@]} -eq 0 ] && return 0
+
+	if [ ! -f "$order_f" ]; then
+		printf '%s\n' "${input[@]}"
+		return 0
+	fi
+
+	local ordered=() line
+	while IFS= read -r line; do
+		line="${line#"${line%%[![:space:]]*}"}"  # ltrim
+		line="${line%"${line##*[![:space:]]}"}"  # rtrim
+		[[ -z "$line" || "$line" == '#'* ]] && continue
+		ordered+=("$line")
+	done < "$order_f"
+
+	if [ ${#ordered[@]} -eq 0 ]; then
+		printf '%s\n' "${input[@]}"
+		return 0
+	fi
+
+	local -A in_input=() emitted=() svc
+	for svc in "${input[@]}"; do
+		in_input["$svc"]=1
+	done
+
+	for svc in "${ordered[@]}"; do
+		[[ -n "${in_input[$svc]:-}" ]] || continue
+		printf '%s\n' "$svc"
+		emitted["$svc"]=1
+	done
+
+	for svc in "${input[@]}"; do
+		[[ -z "${emitted[$svc]:-}" ]] || continue
+		printf '%s\n' "$svc"
+	done
+}
+
 # Filter services by arguments (if any), excluding disabled services unless --all
 filter_services() {
 	local cf
@@ -283,9 +336,10 @@ filter_services() {
 		$invalid && return 1
 	fi
 
-	# Remove disabled services unless --all is set
+	# Remove disabled services unless --all is set; collect result for ordering
+	local result=()
 	if $include_all || [ ${#disabled_services[@]} -eq 0 ]; then
-		printf '%s\n' "${candidates[@]}"
+		result=("${candidates[@]}")
 	else
 		for svc in "${candidates[@]}"; do
 			local is_disabled=false
@@ -300,10 +354,12 @@ filter_services() {
 					error "'${CYAN}${svc}${RESET}' is disabled (use ${CYAN}--all${RESET} to include it)"
 				fi
 			else
-				echo "$svc"
+				result+=("$svc")
 			fi
 		done
 	fi
+
+	[ ${#result[@]} -gt 0 ] && printf '%s\n' "${result[@]}" | apply_order
 }
 
 # ── List command ──────────────────────────────────────────────────────────────
@@ -313,25 +369,16 @@ list() {
 	[ -f "$cf" ] && migrate_disabled_config "$cf" "$(canonical_pwd)"
 	log "Discovered services:"
 	local services=()
-	mapfile -t services < <(get_services)
+	mapfile -t services < <(get_services | apply_order)
 	if [[ ${#services[@]} -eq 0 ]]; then
 		echo "  (none found)"
 	else
-		local enabled=() disabled=()
 		for service in "${services[@]}"; do
 			if is_service_disabled "$service"; then
-				disabled+=("$service")
+				printf "  ${CYAN}%s${RESET} ${YELLOW}(disabled)${RESET}\n" "$service"
 			else
-				enabled+=("$service")
+				printf "  ${CYAN}%s${RESET}\n" "$service"
 			fi
-		done
-		mapfile -t enabled < <(printf '%s\n' "${enabled[@]}" | sort)
-		mapfile -t disabled < <(printf '%s\n' "${disabled[@]}" | sort)
-		for service in "${enabled[@]}"; do
-			printf "  ${CYAN}%s${RESET}\n" "$service"
-		done
-		for service in "${disabled[@]}"; do
-			printf "  ${CYAN}%s${RESET} ${YELLOW}(disabled)${RESET}\n" "$service"
 		done
 	fi
 }
@@ -377,6 +424,10 @@ stop() {
 	local services_output
 	services_output=$(filter_services "$@") || return 1
 	[[ -n "$services_output" ]] && mapfile -t services <<<"$services_output"
+	# Stop in reverse start order so dependents shut down before their dependencies
+	local i n=${#services[@]} rev=()
+	for ((i=n-1; i>=0; i--)); do rev+=("${services[$i]}"); done
+	services=("${rev[@]}")
 	local failed=()
 	for service in "${services[@]}"; do
 		log "Stopping ${CYAN}${service}${RESET}"

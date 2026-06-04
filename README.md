@@ -146,6 +146,25 @@ All services share a Docker bridge network named `services`. Use `mcli create-ne
 
 Disabled services are stored in `${XDG_CONFIG_HOME:-~/.config}/mcli/disabled`. Each entry is a full path to the service directory, scoped by the working directory from which `mcli disable` was run. This means different service directories maintain independent disabled lists.
 
+## Service Ordering
+
+Create `.mcli/order` in the same directory you run `mcli` from to control the start order:
+
+```
+# .mcli/order — one service name per line; # comments allowed
+traefik
+postgres
+app
+worker
+```
+
+- Services named in the file start in listed order.
+- Services not listed follow in discovery order.
+- `mcli stop` always walks the reverse of the start order.
+- `mcli list` reflects the same order.
+
+If `.mcli/order` does not exist, all commands use alphabetical discovery order (the previous default).
+
 ## Shell Completions
 
 `mcli completions` outputs a completion script for bash or zsh. Source it once or add the line to your shell's config file.
@@ -165,6 +184,10 @@ source <(mcli completions zsh)
 Completions cover all commands and, for commands that operate on services, dynamically suggest discovered service names.
 
 ## Changelog
+
+### 0.12.0
+
+- Added service ordering via `.mcli/order`: one service name per line controls the sequence for `start`, `stop`, and `list`; services not in the file follow in discovery order; `stop` always walks the reverse of the start order
 
 ### 0.11.0
 
