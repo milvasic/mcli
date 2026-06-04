@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.18.0"
+VERSION="0.18.1"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -131,7 +131,7 @@ fi
 log() { printf "\n${BOLD}=== %s ===${RESET}\n" "$1" >&2; }
 dry_run_log() { printf "${YELLOW}[dry-run]${RESET} %s\n" "$1" >&2; }
 error() { printf "${RED}ERROR:${RESET} %s\n" "$1" >&2; }
-ok() { printf "${GREEN}%s${RESET}\n" "$1"; }
+ok() { printf "${GREEN}%s${RESET}\n" "$1" >&2; }
 
 # Escape a string for safe inclusion in JSON output.
 json_escape() {
