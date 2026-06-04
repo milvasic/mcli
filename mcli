@@ -1103,6 +1103,9 @@ restore() {
 			error "Cannot combine --all with service names"
 			return 1
 		fi
+		if [[ -n "$backup_name" && "$backup_name" != "latest" && "$backup_name" != "pre-restore-latest" ]]; then
+			printf "${YELLOW}warning:${RESET} --backup '%s' with --all: each service looks up this filename in its own .bkp/<service>/ directory; services that lack it will error and be skipped.\n" "$backup_name" >&2
+		fi
 		local services_output
 		services_output=$(filter_services) || return 1
 		local services=()
@@ -1190,7 +1193,12 @@ restore_one() {
 			chosen_label="[pre-restore] $(basename "$chosen")"
 			;;
 		*)
-			# Exact filename: add .tar.gz suffix if not present, then search both dirs
+			# Exact filename: add .tar.gz suffix if not present, then search both dirs.
+			# Reject path separators to prevent directory traversal via sudo tar.
+			if [[ "$backup_name" == */* ]]; then
+				error "--backup must be a plain filename, not a path (got: '${backup_name}')"
+				return 1
+			fi
 			local lookup="$backup_name"
 			[[ "$lookup" != *.tar.gz ]] && lookup="${lookup}.tar.gz"
 			local candidate_regular="${bkp_dir}/${lookup}"
@@ -1199,7 +1207,7 @@ restore_one() {
 			[ -f "$candidate_regular" ] && found_regular=true
 			[ -f "$candidate_pre" ] && found_pre=true
 			if $found_regular && $found_pre; then
-				error "Ambiguous --backup '${backup_name}': found in both ${bkp_dir}/ and ${bkp_dir}/pre-restore/. Use the full path or rename."
+				error "Ambiguous --backup '${backup_name}': found in both ${bkp_dir}/ and ${bkp_dir}/pre-restore/. Rename one of the conflicting archives."
 				return 1
 			elif $found_regular; then
 				chosen="$candidate_regular"
