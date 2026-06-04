@@ -16,7 +16,15 @@ jobs:
         run: bash -n mcli install.sh install-regen.sh
 
       - name: ShellCheck
-        uses: ludeeus/action-shellcheck@master
-        with:
-          scandir: .
-          files: mcli install.sh install-regen.sh
+        run: shellcheck --severity=error mcli install.sh install-regen.sh
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bats
+        run: sudo apt-get install -y bats
+
+      - name: Run smoke tests
+        run: bats test/smoke.bats

@@ -1,7 +1,7 @@
 setup() {
-  load 'helpers'
   DIR="$( cd "$( dirname "$BATS_TEST_FILENAME" )" >/dev/null 2>&1 && pwd )"
   MCLI="$DIR/../mcli"
+  export XDG_CONFIG_HOME="$(mktemp -d)"
 }
 
 @test "help exits non-zero and prints usage" {
@@ -36,21 +36,23 @@ setup() {
   mkdir foo
   touch foo/docker-compose.yml
 
-  run "$MCLI" list --plain
+  run "$MCLI" list --json
   [ "$status" -eq 0 ]
-  [ "${#lines[@]}" -eq 1 ]
-  [ "${lines[0]}" = "foo" ]
+  echo "$output" | grep -q '"name":"foo","enabled":true'
 
   run "$MCLI" disable foo
   [ "$status" -eq 0 ]
 
-  run "$MCLI" list --plain
+  run "$MCLI" list --json
   [ "$status" -eq 0 ]
-  [ "${#lines[@]}" -eq 1 ]
-  [ "${lines[0]}" = "foo" ]
+  echo "$output" | grep -q '"name":"foo","enabled":false'
 
   run "$MCLI" enable foo
   [ "$status" -eq 0 ]
+
+  run "$MCLI" list --json
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '"name":"foo","enabled":true'
 
   popd >/dev/null || exit 1
   rm -rf "$tmpdir"
