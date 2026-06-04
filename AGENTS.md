@@ -28,7 +28,7 @@ A companion `install.sh` handles installation, upgrades, and uninstallation of `
 - Commands that operate on services accept optional service name arguments via `filter_services` and support `--dry-run` and `--all`
 - `disable` and `enable` are exceptions: they do their own service validation, do not use `filter_services`, and do not support `--dry-run` or `--all`
 - Build commands as bash arrays and run them directly (`"${cmd[@]}"`); use `print_cmd` to render the array as a shell-safe string for `--dry-run` logs. Do not use `eval`
-- Logging output goes to stderr for `log()`, `error()`, `dry_run_log()` helpers; stdout for `ok()`
+- Logging output goes to stderr for `log()`, `error()`, `dry_run_log()`, `ok()` helpers; stdout reserved for parseable output (list results, version, backup size table, completions script, `--json`/`--plain` payloads)
 - Help text uses the `colorize()` function to color-code output based on command names and options (see `colorize_line()` for rules)
 - Update the `help()` function whenever the script changes (bug fixes, new features, new options)
 - Update `README.md` whenever the script changes (bug fixes, new features, new options)
