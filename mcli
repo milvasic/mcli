@@ -288,7 +288,8 @@ apply_order() {
 		return 0
 	fi
 
-	local -A in_input=() emitted=() svc
+	local -A in_input=() emitted=()
+	local svc
 	for svc in "${input[@]}"; do
 		in_input["$svc"]=1
 	done
@@ -369,17 +370,46 @@ list() {
 	[ -f "$cf" ] && migrate_disabled_config "$cf" "$(canonical_pwd)"
 	log "Discovered services:"
 	local services=()
-	mapfile -t services < <(get_services | apply_order)
-	if [[ ${#services[@]} -eq 0 ]]; then
-		echo "  (none found)"
+	local order_f
+	order_f=$(order_file)
+	if [ -f "$order_f" ]; then
+		# Order file present: show all services interleaved in file/discovery order
+		mapfile -t services < <(get_services | apply_order)
+		if [[ ${#services[@]} -eq 0 ]]; then
+			echo "  (none found)"
+		else
+			for service in "${services[@]}"; do
+				if is_service_disabled "$service"; then
+					printf "  ${CYAN}%s${RESET} ${YELLOW}(disabled)${RESET}\n" "$service"
+				else
+					printf "  ${CYAN}%s${RESET}\n" "$service"
+				fi
+			done
+		fi
 	else
-		for service in "${services[@]}"; do
-			if is_service_disabled "$service"; then
-				printf "  ${CYAN}%s${RESET} ${YELLOW}(disabled)${RESET}\n" "$service"
-			else
+		# No order file: preserve original behavior — enabled first (alpha), disabled last (alpha)
+		mapfile -t services < <(get_services)
+		if [[ ${#services[@]} -eq 0 ]]; then
+			echo "  (none found)"
+		else
+			local enabled=() disabled=()
+			for service in "${services[@]}"; do
+				if is_service_disabled "$service"; then
+					disabled+=("$service")
+				else
+					enabled+=("$service")
+				fi
+			done
+			local sorted_enabled=() sorted_disabled=()
+			[ ${#enabled[@]} -gt 0 ] && mapfile -t sorted_enabled < <(printf '%s\n' "${enabled[@]}" | sort)
+			[ ${#disabled[@]} -gt 0 ] && mapfile -t sorted_disabled < <(printf '%s\n' "${disabled[@]}" | sort)
+			for service in "${sorted_enabled[@]}"; do
 				printf "  ${CYAN}%s${RESET}\n" "$service"
-			fi
-		done
+			done
+			for service in "${sorted_disabled[@]}"; do
+				printf "  ${CYAN}%s${RESET} ${YELLOW}(disabled)${RESET}\n" "$service"
+			done
+		fi
 	fi
 }
 
