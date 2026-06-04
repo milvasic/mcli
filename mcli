@@ -1385,7 +1385,7 @@ update() {
 	if $check_only; then
 		local tmpfile
 		tmpfile="$(mktemp)"
-		trap 'rm -f "$tmpfile"' EXIT
+		trap 'rm -f "$tmpfile"' INT TERM EXIT
 		local fetch_ok=true
 		if command -v curl >/dev/null 2>&1; then
 			curl -fsSL "$MCLI_SELF_URL" -o "$tmpfile" 2>/dev/null || fetch_ok=false
@@ -1421,7 +1421,6 @@ update() {
 			exit 2
 			;;
 		esac
-		return
 	fi
 	if $dry_run; then
 		dry_run_log "bash -c \"\$(curl -fsSL \"${INSTALLER_SELF_URL}\")\""
