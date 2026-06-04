@@ -54,6 +54,7 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | `disable <services..>`       | Disable one or more services (excluded from start/stop/restart/pull) |
 | `enable <services..>`        | Re-enable one or more previously disabled services                   |
 | `update`                     | Update mcli to the latest version                                    |
+| `update --check`             | Check if an update is available without installing; exits `0`=up to date, `1`=update available, `2`=local newer, `3`=fetch failed |
 | `completions bash\|zsh`      | Output shell completion script for bash or zsh                       |
 | `version`, `--version`, `-v` | Print version                                                        |
 | `help`, `--help`, `-h`       | Show help message                                                    |
@@ -63,6 +64,7 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | Option      | Description                                                                                                                                 |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--dry-run` | Print the commands that would be executed without running them (applies to: `create-network`, `start`, `stop`, `restart`, `pull`, `backup`, `restore`, `update`) |
+| `--check`   | Check if an update is available without installing; only valid for `update` |
 | `--all`     | Include disabled services in `start`/`stop`/`restart`/`pull`; loop over all services (including disabled) for `backup`/`restore` (applies to: `start`, `stop`, `restart`, `pull`, `backup`, `restore`) |
 | `--live`    | Skip stop/start around backup; back up while the service is running (applies to: `backup`)                                                   |
 | `--keep N`  | After a successful backup, prune oldest archives until at most `N` remain per service. Also accepted by `backup prune`. Pre-restore archives are not counted or pruned. |
@@ -188,6 +190,10 @@ source <(mcli completions zsh)
 Completions cover all commands and, for commands that operate on services, dynamically suggest discovered service names.
 
 ## Changelog
+
+### 0.14.0
+
+- Added `mcli update --check`: fetches the remote script, compares versions, and prints `up to date`, `update available: X.Y.Z → A.B.C`, or `local version is newer` without running the installer; exits `0`/`1`/`2`/`3` respectively, making it safe to wire into cron, motd, or a status line
 
 ### 0.13.0
 

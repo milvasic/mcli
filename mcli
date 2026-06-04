@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.13.0"
+VERSION="0.14.0"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -31,6 +31,7 @@ Commands:
   disable <services..>      # Disable one or more services (excluded from start/stop/restart/pull)
   enable <services..>       # Re-enable one or more previously disabled services
   update                    # Update mcli to the latest version
+  update --check            # Check if an update is available without installing; exit 0=up to date, 1=available, 2=local newer, 3=fetch failed
   completions bash|zsh      # Output shell completion script (source to activate)
   version, --version, -v    # Print version
   help, --help, -h          # Show this message
@@ -52,6 +53,8 @@ Options:
                             #   (applicable to: backup prune)
   --service NAME            # Restrict backup prune to a single service
                             #   (applicable to: backup prune)
+  --check                   # Check if an update is available without installing
+                            #   (applicable to: update)
 
 Service discovery:
   - Each service is an immediate subfolder containing a docker compose file (docker-compose.yml, docker-compose.yaml, compose.yml, or compose.yaml)
@@ -1360,7 +1363,66 @@ ZSH_COMPLETION
 
 # ── Update command ────────────────────────────────────────────────────────────
 INSTALLER_SELF_URL="https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/install.sh"
+MCLI_SELF_URL="https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/mcli"
+
+# Compare two semver strings (X.Y.Z). Prints: greater | lesser | equal.
+semver_cmp() {
+	local v1="$1" v2="$2"
+	if [ "$v1" = "$v2" ]; then echo "equal"; return; fi
+	local i n1 n2
+	for i in 1 2 3; do
+		n1="$(echo "$v1" | cut -d. -f"$i")"
+		n2="$(echo "$v2" | cut -d. -f"$i")"
+		n1="${n1:-0}"; n2="${n2:-0}"
+		if [ "$n1" -gt "$n2" ]; then echo "greater"; return
+		elif [ "$n1" -lt "$n2" ]; then echo "lesser"; return
+		fi
+	done
+	echo "equal"
+}
+
 update() {
+	if $check_only; then
+		local tmpfile
+		tmpfile="$(mktemp)"
+		trap 'rm -f "$tmpfile"' EXIT
+		local fetch_ok=true
+		if command -v curl >/dev/null 2>&1; then
+			curl -fsSL "$MCLI_SELF_URL" -o "$tmpfile" 2>/dev/null || fetch_ok=false
+		elif command -v wget >/dev/null 2>&1; then
+			wget -qO "$tmpfile" "$MCLI_SELF_URL" 2>/dev/null || fetch_ok=false
+		else
+			error "Neither curl nor wget found. Please install one and try again."
+			exit 3
+		fi
+		if ! $fetch_ok; then
+			error "Failed to fetch remote version."
+			exit 3
+		fi
+		local remote_version
+		remote_version="$(grep -m1 '^VERSION=' "$tmpfile" | sed 's/^VERSION="//;s/"$//')"
+		if [ -z "$remote_version" ]; then
+			error "Could not determine remote version."
+			exit 3
+		fi
+		local cmp
+		cmp="$(semver_cmp "$remote_version" "$VERSION")"
+		case "$cmp" in
+		equal)
+			ok "up to date"
+			exit 0
+			;;
+		greater)
+			ok "update available: $VERSION → $remote_version"
+			exit 1
+			;;
+		lesser)
+			ok "local version is newer"
+			exit 2
+			;;
+		esac
+		return
+	fi
 	if $dry_run; then
 		dry_run_log "bash -c \"\$(curl -fsSL \"${INSTALLER_SELF_URL}\")\""
 		return
@@ -1387,6 +1449,7 @@ live=false
 keep_count=""
 older_than=""
 prune_service=""
+check_only=false
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--dry-run)
@@ -1429,6 +1492,10 @@ while [[ $# -gt 0 ]]; do
 		prune_service="$2"
 		shift 2
 		;;
+	--check)
+		check_only=true
+		shift
+		;;
 	-*)
 		error "Unknown option: $1"
 		exit 1
@@ -1442,6 +1509,11 @@ done
 
 if [[ "${COMMAND}" != "backup" && ( -n "$older_than" || -n "$prune_service" ) ]]; then
 	error "--older-than and --service are only valid for 'backup prune'"
+	exit 1
+fi
+
+if $check_only && [[ "${COMMAND}" != "update" ]]; then
+	error "--check is only valid for 'update'"
 	exit 1
 fi
 
