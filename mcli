@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.14.0"
+VERSION="0.15.0"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -16,7 +16,7 @@ Usage: mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 Commands:
   list                      # List discovered services (disabled services are marked)
   create-network            # Ensure the 'services' Docker bridge network exists
-  start [services..]        # Start all or specified services (skips disabled)
+  start [services..]        # Start all or specified services (skips disabled); polls containers for up to 15s after up -d to catch crash-loops (see --no-health, --health-timeout)
   stop [services..]         # Stop all or specified services (skips disabled)
   restart [services..]      # Restart all or specified services (skips disabled)
   pull [services..]         # Pull latest images for all or specified services (skips disabled)
@@ -39,6 +39,12 @@ Commands:
 Options:
   --dry-run                 # Print commands that would be executed, but do not run them
                             #   (applicable to: create-network, start, stop, restart, pull, backup, restore, update)
+                            #   (can appear anywhere after the command)
+  --no-health               # Skip post-start container health polling
+                            #   (applicable to: start, restart)
+                            #   (can appear anywhere after the command)
+  --health-timeout N        # Seconds to poll for running state after docker compose up -d (default: 15)
+                            #   (applicable to: start, restart)
                             #   (can appear anywhere after the command)
   --all                     # Include disabled services in start/stop/restart/pull; loop over all services (including disabled) for backup/restore
                             #   (applicable to: start, stop, restart, pull, backup, restore)
@@ -440,10 +446,17 @@ start() {
 		local -a cmd=(docker compose --project-directory "$service" up -d)
 		if $dry_run; then
 			dry_run_log "$(print_cmd "${cmd[@]}")"
+			if ! $no_health; then
+				dry_run_log "poll: docker compose --project-directory \"$service\" ps --format '{{.State}}' (up to ${health_timeout}s)"
+			fi
 		else
 			if ! "${cmd[@]}"; then
 				error "${CYAN}${service}${RESET} start failed"
 				failed+=("$service")
+			elif ! $no_health; then
+				if ! check_service_health "$service"; then
+					failed+=("$service")
+				fi
 			fi
 		fi
 	done
@@ -589,6 +602,33 @@ pull() {
 		error "The following services failed to pull: ${CYAN}${failed[*]}${RESET}"
 		return 1
 	fi
+}
+
+# ── Post-start health check ──────────────────────────────────────────────────
+# Polls container states for up to $health_timeout seconds after `up -d`.
+# Returns 0 when all containers reach running state.
+# Returns 1 on a terminal bad state (restarting, exited, dead) or timeout.
+check_service_health() {
+	local service="$1"
+	local deadline
+	deadline=$(( $(date +%s) + health_timeout ))
+	local states
+	while [ "$(date +%s)" -lt "$deadline" ]; do
+		states=$(docker compose --project-directory "$service" ps --format '{{.State}}' 2>/dev/null | sort -u)
+		case "$states" in
+			running)
+				return 0
+				;;
+			*restarting*|*exited*|*dead*)
+				error "${CYAN}${service}${RESET} container state: ${states//$'\n'/ }"
+				return 1
+				;;
+		esac
+		sleep 1
+	done
+	states=$(docker compose --project-directory "$service" ps --format '{{.State}}' 2>/dev/null | sort -u)
+	error "${CYAN}${service}${RESET} did not reach running state within ${health_timeout}s (state: ${states:-unknown})"
+	return 1
 }
 
 # Returns 0 if name matches a registered service directory, 1 otherwise.
@@ -1264,7 +1304,10 @@ _mcli() {
 	fi
 
 	case "$command" in
-	start | stop | restart | pull)
+	start | restart)
+		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run --all --no-health --health-timeout" -- "$cur"))
+		;;
+	stop | pull)
 		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run --all" -- "$cur"))
 		;;
 	disable | enable)
@@ -1324,7 +1367,11 @@ _mcli() {
 	services=(${(f)"$(mcli list 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g; s/^ *//; s/ (disabled)//' | grep -v '^(none found)$' | grep -v '^$')"})
 
 	case "$cmd" in
-	start | stop | restart | pull)
+	start | restart)
+		compadd -a services
+		compadd -- --dry-run --all --no-health --health-timeout
+		;;
+	stop | pull)
 		compadd -a services
 		compadd -- --dry-run --all
 		;;
@@ -1449,6 +1496,9 @@ keep_count=""
 older_than=""
 prune_service=""
 check_only=false
+no_health=false
+health_timeout=15
+health_timeout_set=false
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--dry-run)
@@ -1495,6 +1545,23 @@ while [[ $# -gt 0 ]]; do
 		check_only=true
 		shift
 		;;
+	--no-health)
+		no_health=true
+		shift
+		;;
+	--health-timeout)
+		if [ $# -lt 2 ]; then
+			error "Option --health-timeout requires a positive integer argument"
+			exit 1
+		fi
+		if [[ ! "$2" =~ ^[1-9][0-9]*$ ]]; then
+			error "Option --health-timeout requires a positive integer (got: $2)"
+			exit 1
+		fi
+		health_timeout="$2"
+		health_timeout_set=true
+		shift 2
+		;;
 	-*)
 		error "Unknown option: $1"
 		exit 1
@@ -1513,6 +1580,11 @@ fi
 
 if $check_only && [[ "${COMMAND}" != "update" ]]; then
 	error "--check is only valid for 'update'"
+	exit 1
+fi
+
+if ($no_health || $health_timeout_set) && [[ "${COMMAND}" != "start" && "${COMMAND}" != "restart" ]]; then
+	error "--no-health and --health-timeout are only valid for 'start' and 'restart'"
 	exit 1
 fi
 
