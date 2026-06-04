@@ -607,6 +607,7 @@ delete_backup() {
 }
 
 # Keep the newest $n archives for $svc; delete the rest. Pre-restore/ excluded.
+# Returns non-zero if any deletion failed so callers can surface a partial-failure.
 apply_keep_retention() {
 	local svc="$1" n="$2"
 	local svc_dir=".bkp/${svc}"
@@ -618,13 +619,16 @@ apply_keep_retention() {
 	fi
 	local to_delete=$((total - n))
 	log "Pruning ${CYAN}${svc}${RESET}: keeping ${n} of ${total} backup(s), removing ${to_delete}"
-	local i
+	local i pruning_failed=false
 	for ((i = 0; i < to_delete; i++)); do
-		delete_backup "${files[$i]}" || true
+		delete_backup "${files[$i]}" || pruning_failed=true
 	done
+	$pruning_failed && return 1
+	return 0
 }
 
 # Delete archives for $svc with mtime older than $cutoff (epoch seconds).
+# Returns non-zero if any deletion failed so callers can surface a partial-failure.
 apply_older_than_retention() {
 	local svc="$1" cutoff="$2"
 	local svc_dir=".bkp/${svc}"
@@ -642,10 +646,12 @@ apply_older_than_retention() {
 	done
 	[ ${#stale[@]} -eq 0 ] && return 0
 	log "Pruning ${CYAN}${svc}${RESET}: ${#stale[@]} backup(s) older than cutoff"
-	local s
+	local s pruning_failed=false
 	for s in "${stale[@]}"; do
-		delete_backup "$s" || true
+		delete_backup "$s" || pruning_failed=true
 	done
+	$pruning_failed && return 1
+	return 0
 }
 
 # ── Backup command ────────────────────────────────────────────────────────────
@@ -703,6 +709,11 @@ backup() {
 		return $?
 	fi
 
+	if [[ -n "$older_than" || -n "$prune_service" ]]; then
+		error "--older-than and --service are only valid for 'backup prune'"
+		return 1
+	fi
+
 	# Resolve services to back up. --all picks every enabled service;
 	# otherwise a single service argument is required.
 	local services_to_backup=()
@@ -734,6 +745,7 @@ backup() {
 	fi
 
 	local failed=()
+	local prune_failed=()
 	local svc
 	for svc in "${services_to_backup[@]}"; do
 		if ! backup_one "$svc"; then
@@ -741,14 +753,22 @@ backup() {
 			continue
 		fi
 		if [[ -n "$keep_count" ]]; then
-			apply_keep_retention "$svc" "$keep_count"
+			if ! apply_keep_retention "$svc" "$keep_count"; then
+				prune_failed+=("$svc")
+			fi
 		fi
 	done
 
+	local rc=0
 	if [ ${#failed[@]} -gt 0 ]; then
 		error "Backup failed for: ${CYAN}${failed[*]}${RESET}"
-		return 1
+		rc=1
 	fi
+	if [ ${#prune_failed[@]} -gt 0 ]; then
+		error "Retention pruning had failures for: ${CYAN}${prune_failed[*]}${RESET}"
+		rc=1
+	fi
+	return $rc
 }
 
 backup_one() {
@@ -878,6 +898,10 @@ backup_prune() {
 		error "Usage: mcli backup prune (--keep N | --older-than DUR) [--service NAME] [--dry-run]"
 		return 1
 	fi
+	if [[ -n "$prune_service" && "$prune_service" == */* ]]; then
+		error "--service: service name must not contain path separators (got: ${prune_service})"
+		return 1
+	fi
 
 	local bkp_root=".bkp"
 	if [ ! -d "$bkp_root" ]; then
@@ -916,14 +940,22 @@ backup_prune() {
 	fi
 
 	local svc
+	local failed=()
 	for svc in "${services[@]}"; do
+		local svc_failed=false
 		if [[ -n "$keep_count" ]]; then
-			apply_keep_retention "$svc" "$keep_count"
+			apply_keep_retention "$svc" "$keep_count" || svc_failed=true
 		fi
 		if [[ -n "$cutoff" ]]; then
-			apply_older_than_retention "$svc" "$cutoff"
+			apply_older_than_retention "$svc" "$cutoff" || svc_failed=true
 		fi
+		$svc_failed && failed+=("$svc")
 	done
+
+	if [ ${#failed[@]} -gt 0 ]; then
+		error "Prune had failures for: ${CYAN}${failed[*]}${RESET}"
+		return 1
+	fi
 }
 
 # ── Restore command ───────────────────────────────────────────────────────────
@@ -1249,11 +1281,11 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--keep)
 		if [ $# -lt 2 ]; then
-			error "Option --keep requires a non-negative integer argument"
+			error "Option --keep requires a positive integer argument"
 			exit 1
 		fi
-		if [[ ! "$2" =~ ^[0-9]+$ ]]; then
-			error "Option --keep requires a non-negative integer (got: $2)"
+		if [[ ! "$2" =~ ^[1-9][0-9]*$ ]]; then
+			error "Option --keep requires a positive integer (got: $2)"
 			exit 1
 		fi
 		keep_count="$2"
@@ -1285,6 +1317,11 @@ while [[ $# -gt 0 ]]; do
 		;;
 	esac
 done
+
+if [[ "${COMMAND}" != "backup" && ( -n "$older_than" || -n "$prune_service" ) ]]; then
+	error "--older-than and --service are only valid for 'backup prune'"
+	exit 1
+fi
 
 case "${COMMAND}" in
 list) list ;;
