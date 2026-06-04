@@ -36,42 +36,48 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 
 ### Commands
 
-| Command                      | Description                                                          |
-| ---------------------------- | -------------------------------------------------------------------- |
-| `list`                       | List discovered services (disabled services are marked)              |
-| `create-network`             | Ensure the shared `services` Docker bridge network exists            |
-| `start [services..]`         | Start all or specified services (skips disabled); polls containers after `up -d` to catch crash-loops |
-| `stop [services..]`          | Stop all or specified services, removing orphans (skips disabled)    |
-| `restart [services..]`       | Restart all or specified services (skips disabled)                   |
-| `pull [services..]`          | Pull latest images, skipping buildable services (skips disabled)     |
-| `backup <service>`           | Stop service, back up to `.bkp/<service>/<date>[.<counter>].tar.gz`, restart service. Archive includes `image.txt` with container image digests. |
-| `backup <service> --live`    | Back up without stopping (live backup)                               |
-| `backup --all`               | Back up every enabled service in turn                                |
-| `backup size`                | Show disk space used by all backups under `.bkp/`                   |
-| `backup prune`               | Prune old backups by count (`--keep N`) and/or age (`--older-than DUR`); optionally scoped with `--service NAME`. Pre-restore archives under `pre-restore/` are not pruned. |
-| `restore <service>`          | Restore service from a backup archive in `.bkp/<service>/`; interactive picker when multiple backups exist. Wipes the service dir before extraction so its contents match the archive exactly. |
-| `restore --all`              | Restore every enabled service in turn; interactive picker per service when multiple backups exist. Continues past per-service failures and reports all at the end. |
-| `disable <services..>`       | Disable one or more services (excluded from start/stop/restart/pull) |
-| `enable <services..>`        | Re-enable one or more previously disabled services                   |
-| `update`                     | Update mcli to the latest version                                    |
-| `update --check`             | Check if an update is available without installing; exits `0`=up to date, `1`=update available, `2`=local newer, `3`=fetch failed |
-| `completions bash\|zsh`      | Output shell completion script for bash or zsh                       |
-| `version`, `--version`, `-v` | Print version                                                        |
-| `help`, `--help`, `-h`       | Show help message                                                    |
+| Command                                         | Description                                                                                                                                                                                    |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list`                                          | List discovered services (disabled services are marked)                                                                                                                                        |
+| `create-network`                                | Ensure the shared `services` Docker bridge network exists                                                                                                                                      |
+| `start [services..]`                            | Start all or specified services (skips disabled); polls containers after `up -d` to catch crash-loops                                                                                          |
+| `stop [services..]`                             | Stop all or specified services, removing orphans (skips disabled)                                                                                                                              |
+| `restart [services..]`                          | Restart all or specified services (skips disabled)                                                                                                                                             |
+| `pull [services..]`                             | Pull latest images, skipping buildable services (skips disabled)                                                                                                                               |
+| `backup <service>`                              | Stop service, back up to `.bkp/<service>/<date>[.<counter>].tar.gz`, restart service. Archive includes `image.txt` with container image digests.                                               |
+| `backup <service> --live`                       | Back up without stopping (live backup)                                                                                                                                                         |
+| `backup --all`                                  | Back up every enabled service in turn                                                                                                                                                          |
+| `backup size`                                   | Show disk space used by all backups under `.bkp/`                                                                                                                                              |
+| `backup prune`                                  | Prune old backups by count (`--keep N`) and/or age (`--older-than DUR`); optionally scoped with `--service NAME`. Pre-restore archives under `pre-restore/` are not pruned.                    |
+| `restore <service>`                             | Restore service from a backup archive in `.bkp/<service>/`; interactive picker when multiple backups exist. Wipes the service dir before extraction so its contents match the archive exactly. |
+| `restore <service> --backup <name>`             | Restore from a specific archive (exact filename, with or without `.tar.gz`) found under `.bkp/<service>/` or `.bkp/<service>/pre-restore/`.                                                    |
+| `restore <service> --backup latest`             | Restore from the newest regular backup (by mtime), skipping the interactive picker.                                                                                                            |
+| `restore <service> --backup pre-restore-latest` | Restore from the newest pre-restore archive (by mtime).                                                                                                                                        |
+| `restore --all`                                 | Restore every enabled service in turn; interactive picker per service when multiple backups exist. Continues past per-service failures and reports all at the end.                             |
+| `disable <services..>`                          | Disable one or more services (excluded from start/stop/restart/pull)                                                                                                                           |
+| `enable <services..>`                           | Re-enable one or more previously disabled services                                                                                                                                             |
+| `update`                                        | Update mcli to the latest version                                                                                                                                                              |
+| `update --check`                                | Check if an update is available without installing; exits `0`=up to date, `1`=update available, `2`=local newer, `3`=fetch failed                                                              |
+| `completions bash\|zsh`                         | Output shell completion script for bash or zsh                                                                                                                                                 |
+| `version`, `--version`, `-v`                    | Print version                                                                                                                                                                                  |
+| `help`, `--help`, `-h`                          | Show help message                                                                                                                                                                              |
 
 ### Options
 
-| Option      | Description                                                                                                                                 |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--dry-run` | Print the commands that would be executed without running them (applies to: `create-network`, `start`, `stop`, `restart`, `pull`, `backup`, `restore`, `update`) |
-| `--check`   | Check if an update is available without installing; only valid for `update` |
-| `--no-health` | Skip post-start container health polling (applies to: `start`, `restart`) |
-| `--health-timeout N` | Seconds to poll for running state after `docker compose up -d`; default `15` (applies to: `start`, `restart`) |
-| `--all`     | Include disabled services in `start`/`stop`/`restart`/`pull`; loop over all services (including disabled) for `backup`/`restore` (applies to: `start`, `stop`, `restart`, `pull`, `backup`, `restore`) |
-| `--live`    | Skip stop/start around backup; back up while the service is running (applies to: `backup`)                                                   |
-| `--keep N`  | After a successful backup, prune oldest archives until at most `N` remain per service. Also accepted by `backup prune`. Pre-restore archives are not counted or pruned. |
-| `--older-than DUR` | For `backup prune`: delete archives older than `DUR`. `DUR` is `<N><unit>` with unit one of `s`, `m` (minutes), `h`, `d`, `w` — e.g. `30d`, `12h`, `2w`. |
-| `--service NAME` | For `backup prune`: restrict pruning to a single service.                                                            |
+| Option                                        | Description                                                                                                                                                                                                                        |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--dry-run`                                   | Print the commands that would be executed without running them (applies to: `create-network`, `start`, `stop`, `restart`, `pull`, `backup`, `restore`, `update`)                                                                   |
+| `--check`                                     | Check if an update is available without installing; only valid for `update`                                                                                                                                                        |
+| `--no-health`                                 | Skip post-start container health polling (applies to: `start`, `restart`)                                                                                                                                                          |
+| `--health-timeout N`                          | Seconds to poll for running state after `docker compose up -d`; default `15` (applies to: `start`, `restart`)                                                                                                                      |
+| `--all`                                       | Include disabled services in `start`/`stop`/`restart`/`pull`; loop over all services (including disabled) for `backup`/`restore` (applies to: `start`, `stop`, `restart`, `pull`, `backup`, `restore`)                             |
+| `--live`                                      | Skip stop/start around backup; back up while the service is running (applies to: `backup`)                                                                                                                                         |
+| `--keep N`                                    | After a successful backup, prune oldest archives until at most `N` remain per service. Also accepted by `backup prune`. Pre-restore archives are not counted or pruned.                                                            |
+| `--older-than DUR`                            | For `backup prune`: delete archives older than `DUR`. `DUR` is `<N><unit>` with unit one of `s`, `m` (minutes), `h`, `d`, `w` — e.g. `30d`, `12h`, `2w`.                                                                           |
+| `--service NAME`                              | For `backup prune`: restrict pruning to a single service.                                                                                                                                                                          |
+| `--backup <name\|latest\|pre-restore-latest>` | For `restore`: select a backup non-interactively. `latest` picks the newest regular archive by mtime; `pre-restore-latest` picks the newest pre-restore archive; any other value is an exact filename (`.tar.gz` suffix optional). |
+| `--yes`                                       | For `restore`: auto-accept the pre-restore snapshot prompt. Mutually exclusive with `--no-pre-restore`.                                                                                                                            |
+| `--no-pre-restore`                            | For `restore`: skip the pre-restore snapshot entirely (no prompt, no archive created). Mutually exclusive with `--yes`.                                                                                                            |
 
 All options can appear anywhere after the command.
 
@@ -134,6 +140,15 @@ mcli restore my-service --dry-run
 
 # Restore every enabled service in turn (interactive picker per service)
 mcli restore --all
+
+# Restore from the newest backup without interaction (skip picker and pre-restore prompt)
+mcli restore my-service --backup latest --no-pre-restore
+
+# Restore from a specific archive and create a pre-restore snapshot automatically
+mcli restore my-service --backup 2026-06-01.tar.gz --yes
+
+# Restore the most recent pre-restore snapshot
+mcli restore my-service --backup pre-restore-latest --no-pre-restore
 ```
 
 ## Service Discovery
@@ -192,6 +207,13 @@ source <(mcli completions zsh)
 Completions cover all commands and, for commands that operate on services, dynamically suggest discovered service names.
 
 ## Changelog
+
+### 0.16.0
+
+- `mcli restore <service> --backup <name|latest|pre-restore-latest>` selects a backup without the interactive picker: `latest` picks the newest regular archive by mtime, `pre-restore-latest` picks the newest pre-restore archive, and any other value is an exact filename looked up under `.bkp/<service>/` and `.bkp/<service>/pre-restore/` (`.tar.gz` suffix optional)
+- `--yes` auto-accepts the pre-restore snapshot prompt, creating the safety archive without interaction
+- `--no-pre-restore` skips the pre-restore snapshot entirely (no prompt, no archive)
+- `--yes` and `--no-pre-restore` are mutually exclusive; using either with a non-`restore` command is an error
 
 ### 0.15.0
 

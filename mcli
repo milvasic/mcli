@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.15.0"
+VERSION="0.16.0"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -26,7 +26,10 @@ Commands:
   backup --all              # Back up every enabled service in turn
   backup size               # Show disk space used by backups
   backup prune              # Prune old backups by count and/or age; see --keep, --older-than, --service
-  restore <service>         # Restore service from a backup archive in .bkp/<service>/
+  restore <service>         # Restore service from a backup archive in .bkp/<service>/; interactive picker when multiple backups exist
+  restore <service> --backup <name>     # Restore from exact archive filename (tar.gz) under .bkp/<service>/; also searches pre-restore/
+  restore <service> --backup latest     # Restore from the newest regular backup (by mtime)
+  restore <service> --backup pre-restore-latest  # Restore from the newest pre-restore archive (by mtime)
   restore --all             # Restore every enabled service in turn; interactive picker per service
   disable <services..>      # Disable one or more services (excluded from start/stop/restart/pull)
   enable <services..>       # Re-enable one or more previously disabled services
@@ -59,6 +62,15 @@ Options:
                             #   (applicable to: backup prune)
   --service NAME            # Restrict backup prune to a single service
                             #   (applicable to: backup prune)
+  --backup <name|latest|pre-restore-latest>
+                            # Select a backup non-interactively; 'latest' picks the newest regular archive by mtime,
+                            #   'pre-restore-latest' picks the newest pre-restore archive by mtime,
+                            #   any other value is treated as an exact filename (with or without .tar.gz)
+                            #   (applicable to: restore)
+  --yes                     # Auto-accept the pre-restore snapshot prompt without interaction
+                            #   (applicable to: restore; mutually exclusive with --no-pre-restore)
+  --no-pre-restore          # Skip the pre-restore snapshot entirely (do not prompt, do not create)
+                            #   (applicable to: restore; mutually exclusive with --yes)
   --check                   # Check if an update is available without installing
                             #   (applicable to: update)
 
@@ -1113,7 +1125,7 @@ restore() {
 	fi
 
 	if [ $# -ne 1 ]; then
-		error "Usage: mcli restore <service>"
+		error "Usage: mcli restore <service> [--backup <name|latest|pre-restore-latest>] [--yes | --no-pre-restore]"
 		error "       mcli restore --all"
 		return 1
 	fi
@@ -1153,7 +1165,62 @@ restore_one() {
 
 	local chosen
 	local chosen_label
-	if [ ${#backups[@]} -eq 1 ]; then
+	if [[ -n "$backup_name" ]]; then
+		case "$backup_name" in
+		latest)
+			shopt -s nullglob
+			local regular_files=("${bkp_dir}"/*.tar.gz)
+			shopt -u nullglob
+			if [ ${#regular_files[@]} -eq 0 ]; then
+				error "No regular backups found for ${CYAN}${service}${RESET} in ${bkp_dir}/"
+				return 1
+			fi
+			chosen=$(stat -c '%Y %n' "${regular_files[@]}" | sort -rn | head -1 | cut -d' ' -f2-)
+			chosen_label="$(basename "$chosen")"
+			;;
+		pre-restore-latest)
+			shopt -s nullglob
+			local pre_files=("${bkp_dir}"/pre-restore/*.tar.gz)
+			shopt -u nullglob
+			if [ ${#pre_files[@]} -eq 0 ]; then
+				error "No pre-restore backups found for ${CYAN}${service}${RESET} in ${bkp_dir}/pre-restore/"
+				return 1
+			fi
+			chosen=$(stat -c '%Y %n' "${pre_files[@]}" | sort -rn | head -1 | cut -d' ' -f2-)
+			chosen_label="[pre-restore] $(basename "$chosen")"
+			;;
+		*)
+			# Exact filename: add .tar.gz suffix if not present, then search both dirs
+			local lookup="$backup_name"
+			[[ "$lookup" != *.tar.gz ]] && lookup="${lookup}.tar.gz"
+			local candidate_regular="${bkp_dir}/${lookup}"
+			local candidate_pre="${bkp_dir}/pre-restore/${lookup}"
+			local found_regular=false found_pre=false
+			[ -f "$candidate_regular" ] && found_regular=true
+			[ -f "$candidate_pre" ] && found_pre=true
+			if $found_regular && $found_pre; then
+				error "Ambiguous --backup '${backup_name}': found in both ${bkp_dir}/ and ${bkp_dir}/pre-restore/. Use the full path or rename."
+				return 1
+			elif $found_regular; then
+				chosen="$candidate_regular"
+				chosen_label="$(basename "$chosen")"
+			elif $found_pre; then
+				chosen="$candidate_pre"
+				chosen_label="[pre-restore] $(basename "$chosen")"
+			else
+				error "--backup '${backup_name}' not found under ${bkp_dir}/ or ${bkp_dir}/pre-restore/"
+				log "Available backups for ${CYAN}${service}${RESET}:"
+				local i=1
+				for label in "${labels[@]}"; do
+					printf "  %d) %s\n" "$i" "$label" >&2
+					((i++))
+				done
+				return 1
+			fi
+			;;
+		esac
+		log "Restoring ${CYAN}${service}${RESET} from ${chosen_label}"
+	elif [ ${#backups[@]} -eq 1 ]; then
 		chosen="${backups[0]}"
 		chosen_label="${labels[0]}"
 		log "Restoring ${CYAN}${service}${RESET} from ${chosen_label}"
@@ -1203,12 +1270,25 @@ restore_one() {
 
 	# Pre-restore backup prompt (after stop, so the archive captures a clean state)
 	if $dry_run; then
-		dry_run_log "Prompt: 'Back up current version before restoring? [y/N]'"
-		dry_run_log "sudo tar czf \"${bkp_dir}/pre-restore/<date>.tar.gz\" -C \"${service}\" ."
+		if $no_pre_restore; then
+			dry_run_log "Skipping pre-restore snapshot (--no-pre-restore)"
+		elif $auto_yes; then
+			dry_run_log "Auto-accepting pre-restore snapshot (--yes)"
+			dry_run_log "sudo tar czf \"${bkp_dir}/pre-restore/<date>.tar.gz\" -C \"${service}\" ."
+		else
+			dry_run_log "Prompt: 'Back up current version before restoring? [y/N]'"
+			dry_run_log "sudo tar czf \"${bkp_dir}/pre-restore/<date>.tar.gz\" -C \"${service}\" ."
+		fi
+	elif $no_pre_restore; then
+		: # skip silently
 	else
 		local pre_restore_ans
-		printf "Back up current version before restoring? [y/N] " >&2
-		read -r pre_restore_ans
+		if $auto_yes; then
+			pre_restore_ans="y"
+		else
+			printf "Back up current version before restoring? [y/N] " >&2
+			read -r pre_restore_ans
+		fi
 		if [[ "$pre_restore_ans" =~ ^[Yy]$ ]]; then
 			local today pre_restore_dir pre_restore_dest
 			today=$(date +%Y-%m-%d)
@@ -1315,7 +1395,7 @@ _mcli() {
 		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run" -- "$cur"))
 		;;
 	restore)
-		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run --all" -- "$cur"))
+		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run --all --backup --yes --no-pre-restore" -- "$cur"))
 		;;
 	backup)
 		COMPREPLY=($(compgen -W "size prune $(__mcli_services) --dry-run --live --all --keep --older-than --service" -- "$cur"))
@@ -1382,7 +1462,7 @@ _mcli() {
 		;;
 	restore)
 		compadd -a services
-		compadd -- --dry-run --all
+		compadd -- --dry-run --all --backup --yes --no-pre-restore
 		;;
 	backup)
 		compadd -- size prune
@@ -1500,6 +1580,9 @@ check_only=false
 no_health=false
 health_timeout=15
 health_timeout_set=false
+backup_name=""
+auto_yes=false
+no_pre_restore=false
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--dry-run)
@@ -1563,6 +1646,22 @@ while [[ $# -gt 0 ]]; do
 		health_timeout_set=true
 		shift 2
 		;;
+	--backup)
+		if [ $# -lt 2 ]; then
+			error "Option --backup requires an argument (filename, 'latest', or 'pre-restore-latest')"
+			exit 1
+		fi
+		backup_name="$2"
+		shift 2
+		;;
+	--yes)
+		auto_yes=true
+		shift
+		;;
+	--no-pre-restore)
+		no_pre_restore=true
+		shift
+		;;
 	-*)
 		error "Unknown option: $1"
 		exit 1
@@ -1576,6 +1675,16 @@ done
 
 if [[ "${COMMAND}" != "backup" && ( -n "$older_than" || -n "$prune_service" ) ]]; then
 	error "--older-than and --service are only valid for 'backup prune'"
+	exit 1
+fi
+
+if [[ -n "$backup_name" || $auto_yes == true || $no_pre_restore == true ]] && [[ "${COMMAND}" != "restore" ]]; then
+	error "--backup, --yes, and --no-pre-restore are only valid for 'restore'"
+	exit 1
+fi
+
+if $auto_yes && $no_pre_restore; then
+	error "--yes and --no-pre-restore are mutually exclusive"
 	exit 1
 fi
 
