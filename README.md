@@ -63,7 +63,7 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | Option      | Description                                                                                                                                 |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--dry-run` | Print the commands that would be executed without running them (applies to: `create-network`, `start`, `stop`, `restart`, `pull`, `backup`, `restore`, `update`) |
-| `--all`     | Include disabled services in `start`/`stop`/`restart`/`pull`; loop over all enabled services for `backup`/`restore` (applies to: `start`, `stop`, `restart`, `pull`, `backup`, `restore`) |
+| `--all`     | Include disabled services in `start`/`stop`/`restart`/`pull`; loop over all services (including disabled) for `backup`/`restore` (applies to: `start`, `stop`, `restart`, `pull`, `backup`, `restore`) |
 | `--live`    | Skip stop/start around backup; back up while the service is running (applies to: `backup`)                                                   |
 | `--keep N`  | After a successful backup, prune oldest archives until at most `N` remain per service. Also accepted by `backup prune`. Pre-restore archives are not counted or pruned. |
 | `--older-than DUR` | For `backup prune`: delete archives older than `DUR`. `DUR` is `<N><unit>` with unit one of `s`, `m` (minutes), `h`, `d`, `w` — e.g. `30d`, `12h`, `2w`. |

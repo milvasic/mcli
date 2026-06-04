@@ -39,7 +39,7 @@ Options:
   --dry-run                 # Print commands that would be executed, but do not run them
                             #   (applicable to: create-network, start, stop, restart, pull, backup, restore, update)
                             #   (can appear anywhere after the command)
-  --all                     # Include disabled services in start/stop/restart/pull; loop over all enabled services for backup/restore
+  --all                     # Include disabled services in start/stop/restart/pull; loop over all services (including disabled) for backup/restore
                             #   (applicable to: start, stop, restart, pull, backup, restore)
                             #   (can appear anywhere after the command)
   --live                    # Skip stop/start around backup; back up while the service is running
@@ -1181,6 +1181,8 @@ restore_one() {
 			log "Creating pre-restore backup of ${CYAN}${service}${RESET}"
 			if ! sudo tar czf "$pre_restore_dest" -C "$service" .; then
 				error "Failed to create pre-restore backup"
+				log "Restarting ${CYAN}${service}${RESET} after failed pre-restore backup"
+				docker compose --project-directory "$service" up -d || true
 				return 1
 			fi
 			ok "Pre-restore backup: ${pre_restore_dest}"
