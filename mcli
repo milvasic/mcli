@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.16.0"
+VERSION="0.17.0"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -35,13 +35,16 @@ Commands:
   enable <services..>       # Re-enable one or more previously disabled services
   update                    # Update mcli to the latest version
   update --check            # Check if an update is available without installing; exit 0=up to date, 1=available, 2=local newer, 3=fetch failed
+  logs <service> [--follow|-f] [--tail N]   # Tail logs for a service (docker compose logs)
+  ps [services..]                            # Show container status for all or specified services (docker compose ps)
+  exec <service> <cmd> [args..]              # Execute a command in a running container (docker compose exec)
   completions bash|zsh      # Output shell completion script (source to activate)
   version, --version, -v    # Print version
   help, --help, -h          # Show this message
 
 Options:
   --dry-run                 # Print commands that would be executed, but do not run them
-                            #   (applicable to: create-network, start, stop, restart, pull, backup, restore, update)
+                            #   (applicable to: create-network, start, stop, restart, pull, backup, restore, update, logs, ps, exec)
                             #   (can appear anywhere after the command)
   --no-health               # Skip post-start container health polling
                             #   (applicable to: start, restart)
@@ -49,8 +52,8 @@ Options:
   --health-timeout N        # Seconds to poll for running state after docker compose up -d (default: 15)
                             #   (applicable to: start, restart)
                             #   (can appear anywhere after the command)
-  --all                     # Include disabled services in start/stop/restart/pull; loop over all services (including disabled) for backup/restore
-                            #   (applicable to: start, stop, restart, pull, backup, restore)
+  --all                     # Include disabled services in start/stop/restart/pull/logs/ps/exec; loop over all services (including disabled) for backup/restore
+                            #   (applicable to: start, stop, restart, pull, backup, restore, logs, ps, exec)
                             #   (can appear anywhere after the command)
   --live                    # Skip stop/start around backup; back up while the service is running
                             #   (applicable to: backup)
@@ -71,6 +74,10 @@ Options:
                             #   (applicable to: restore; mutually exclusive with --no-pre-restore)
   --no-pre-restore          # Skip the pre-restore snapshot entirely (do not prompt, do not create)
                             #   (applicable to: restore; mutually exclusive with --yes)
+  --follow, -f              # Follow log output (like tail -f)
+                            #   (applicable to: logs)
+  --tail N                  # Show N lines from the end of the logs (default: all)
+                            #   (applicable to: logs)
   --check                   # Check if an update is available without installing
                             #   (applicable to: update)
 
@@ -132,7 +139,7 @@ print_cmd() {
 colorize_line() {
 	sed \
 		-e "s/\\(^\\|[^[:alnum:]_'-]\\)\\(mcli\\)\\([^[:alnum:]_'-]\\|$\\)/\\1${GREEN}\\2${RESET}\\3/g" \
-		-e "s/\\(^\\|[^[:alnum:]_'-]\\)\\(list\\|create-network\\|start\\|stop\\|restart\\|pull\\|backup\\|restore\\|enable\\|disable\\|update\\|completions\\|version\\|help\\)\\([^[:alnum:]_'-]\\|$\\)/\\1${YELLOW}\\2${RESET}\\3/g" \
+		-e "s/\\(^\\|[^[:alnum:]_'-]\\)\\(list\\|create-network\\|start\\|stop\\|restart\\|pull\\|backup\\|restore\\|enable\\|disable\\|update\\|logs\\|ps\\|exec\\|completions\\|version\\|help\\)\\([^[:alnum:]_'-]\\|$\\)/\\1${YELLOW}\\2${RESET}\\3/g" \
 		-e "s/--[a-z][a-z-]*/${CYAN}&${RESET}/g" \
 		-e "s/\([ ,]\)\(-[a-z]\)/\\1${CYAN}\\2${RESET}/g"
 }
@@ -590,6 +597,96 @@ disable() {
 			ok "${CYAN}${arg}${RESET} disabled"
 		fi
 	done
+}
+
+# ── Logs / Ps / Exec commands ──────────────────────────────────────────────────
+logs() {
+	if [ $# -eq 0 ]; then
+		error "Usage: mcli logs <service> [--follow|-f] [--tail N]"
+		return 1
+	fi
+	local services=()
+	local services_output
+	services_output=$(filter_services "$@") || return 1
+	[[ -n "$services_output" ]] && mapfile -t services <<<"$services_output"
+	if [ ${#services[@]} -eq 0 ]; then
+		error "No services matched"
+		return 1
+	fi
+	local failed=()
+	for service in "${services[@]}"; do
+		log "Logs for ${CYAN}${service}${RESET}"
+		local -a cmd=(docker compose --project-directory "$service" logs)
+		$follow && cmd+=(--follow)
+		[[ -n "$tail_count" ]] && cmd+=(--tail "$tail_count")
+		if $dry_run; then
+			dry_run_log "$(print_cmd "${cmd[@]}")"
+		else
+			if ! "${cmd[@]}"; then
+				error "${CYAN}${service}${RESET} logs failed"
+				failed+=("$service")
+			fi
+		fi
+	done
+	if [ ${#failed[@]} -gt 0 ]; then
+		error "The following services failed: ${CYAN}${failed[*]}${RESET}"
+		return 1
+	fi
+}
+
+ps() {
+	local services=()
+	local services_output
+	services_output=$(filter_services "$@") || return 1
+	[[ -n "$services_output" ]] && mapfile -t services <<<"$services_output"
+	if [ ${#services[@]} -eq 0 ]; then
+		error "No services matched"
+		return 1
+	fi
+	local failed=()
+	for service in "${services[@]}"; do
+		log "Status for ${CYAN}${service}${RESET}"
+		local -a cmd=(docker compose --project-directory "$service" ps)
+		if $dry_run; then
+			dry_run_log "$(print_cmd "${cmd[@]}")"
+		else
+			if ! "${cmd[@]}"; then
+				error "${CYAN}${service}${RESET} ps failed"
+				failed+=("$service")
+			fi
+		fi
+	done
+	if [ ${#failed[@]} -gt 0 ]; then
+		error "The following services failed: ${CYAN}${failed[*]}${RESET}"
+		return 1
+	fi
+}
+
+exec() {
+	if [ $# -lt 2 ]; then
+		error "Usage: mcli exec <service> <cmd> [args..]"
+		return 1
+	fi
+	local service="$1"
+	shift
+	local cmd_args=("$@")
+	local services=()
+	local services_output
+	services_output=$(filter_services "$service") || return 1
+	[[ -n "$services_output" ]] && mapfile -t services <<<"$services_output"
+	if [ ${#services[@]} -eq 0 ]; then
+		error "Service not found or disabled: ${CYAN}${service}${RESET}"
+		return 1
+	fi
+	local -a cmd=(docker compose --project-directory "$service" exec "${cmd_args[@]}")
+	if $dry_run; then
+		dry_run_log "$(print_cmd "${cmd[@]}")"
+	else
+		if ! "${cmd[@]}"; then
+			error "${CYAN}${service}${RESET} exec failed"
+			return 1
+		fi
+	fi
 }
 
 pull() {
@@ -1385,7 +1482,7 @@ _mcli() {
 	local cur="${COMP_WORDS[COMP_CWORD]}"
 	local cword="$COMP_CWORD"
 	local command="${COMP_WORDS[1]:-}"
-	local all_commands="list create-network start stop restart pull backup restore disable enable update completions version help"
+	local all_commands="list create-network start stop restart pull logs ps exec backup restore disable enable update completions version help"
 
 	if [[ "$cword" -eq 1 ]]; then
 		COMPREPLY=($(compgen -W "$all_commands" -- "$cur"))
@@ -1397,6 +1494,15 @@ _mcli() {
 		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run --all --no-health --health-timeout" -- "$cur"))
 		;;
 	stop | pull)
+		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run --all" -- "$cur"))
+		;;
+	logs)
+		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run --all --follow --tail" -- "$cur"))
+		;;
+	ps)
+		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run --all" -- "$cur"))
+		;;
+	exec)
 		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run --all" -- "$cur"))
 		;;
 	disable | enable)
@@ -1440,6 +1546,9 @@ _mcli() {
 			'stop:Stop all or specified services'
 			'restart:Restart all or specified services'
 			'pull:Pull latest images for services'
+			'logs:Tail logs for a service'
+			'ps:Show container status for services'
+			'exec:Execute a command in a running container'
 			'backup:Back up a service'
 			'restore:Restore a service from a backup archive'
 			'disable:Disable one or more services'
@@ -1461,6 +1570,14 @@ _mcli() {
 		compadd -- --dry-run --all --no-health --health-timeout
 		;;
 	stop | pull)
+		compadd -a services
+		compadd -- --dry-run --all
+		;;
+	logs)
+		compadd -a services
+		compadd -- --dry-run --all --follow --tail
+		;;
+	ps | exec)
 		compadd -a services
 		compadd -- --dry-run --all
 		;;
@@ -1585,6 +1702,8 @@ keep_count=""
 older_than=""
 prune_service=""
 check_only=false
+follow=false
+tail_count=""
 no_health=false
 health_timeout=15
 health_timeout_set=false
@@ -1631,6 +1750,22 @@ while [[ $# -gt 0 ]]; do
 			exit 1
 		fi
 		prune_service="$2"
+		shift 2
+		;;
+	--follow | -f)
+		follow=true
+		shift
+		;;
+	--tail)
+		if [ $# -lt 2 ]; then
+			error "Option --tail requires a positive integer argument"
+			exit 1
+		fi
+		if [[ ! "$2" =~ ^[1-9][0-9]*$ ]]; then
+			error "Option --tail requires a positive integer (got: $2)"
+			exit 1
+		fi
+		tail_count="$2"
 		shift 2
 		;;
 	--check)
@@ -1710,6 +1845,11 @@ if $no_health && $health_timeout_set; then
 	printf "${YELLOW}warning:${RESET} --health-timeout has no effect when --no-health is set\n" >&2
 fi
 
+if ($follow || [[ -n "$tail_count" ]]) && [[ "${COMMAND}" != "logs" ]]; then
+	error "--follow and --tail are only valid for 'logs'"
+	exit 1
+fi
+
 case "${COMMAND}" in
 list) list ;;
 create-network) create_network ;;
@@ -1717,6 +1857,9 @@ start) start "${service_args[@]}" ;;
 stop) stop "${service_args[@]}" ;;
 restart) restart "${service_args[@]}" ;;
 pull) pull "${service_args[@]}" ;;
+logs) logs "${service_args[@]}" ;;
+ps) ps "${service_args[@]}" ;;
+exec) exec "${service_args[@]}" ;;
 backup) backup "${service_args[@]}" ;;
 restore) restore "${service_args[@]}" ;;
 enable) enable "${service_args[@]}" ;;

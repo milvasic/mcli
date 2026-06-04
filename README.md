@@ -44,6 +44,9 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | `stop [services..]`                             | Stop all or specified services, removing orphans (skips disabled)                                                                                                                              |
 | `restart [services..]`                          | Restart all or specified services (skips disabled)                                                                                                                                             |
 | `pull [services..]`                             | Pull latest images, skipping buildable services (skips disabled)                                                                                                                               |
+| `logs <service> [--follow\|-f] [--tail N]`      | Tail logs for a service via `docker compose logs` (skips disabled)                                                                                                                             |
+| `ps [services..]`                               | Show container status for all or specified services via `docker compose ps` (skips disabled)                                                                                                   |
+| `exec <service> <cmd> [args..]`                 | Execute a command in a running container via `docker compose exec` (skips disabled)                                                                                                            |
 | `backup <service>`                              | Stop service, back up to `.bkp/<service>/<date>[.<counter>].tar.gz`, restart service. Archive includes `image.txt` with container image digests.                                               |
 | `backup <service> --live`                       | Back up without stopping (live backup)                                                                                                                                                         |
 | `backup --all`                                  | Back up every enabled service in turn                                                                                                                                                          |
@@ -66,20 +69,23 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 
 ### Options
 
-| Option                                        | Description                                                                                                                                                                                                                        |
-| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--dry-run`                                   | Print the commands that would be executed without running them (applies to: `create-network`, `start`, `stop`, `restart`, `pull`, `backup`, `restore`, `update`)                                                                   |
-| `--check`                                     | Check if an update is available without installing; only valid for `update`                                                                                                                                                        |
-| `--no-health`                                 | Skip post-start container health polling (applies to: `start`, `restart`)                                                                                                                                                          |
-| `--health-timeout N`                          | Seconds to poll for running state after `docker compose up -d`; default `15` (applies to: `start`, `restart`)                                                                                                                      |
-| `--all`                                       | Include disabled services in `start`/`stop`/`restart`/`pull`; loop over all services (including disabled) for `backup`/`restore` (applies to: `start`, `stop`, `restart`, `pull`, `backup`, `restore`)                             |
-| `--live`                                      | Skip stop/start around backup; back up while the service is running (applies to: `backup`)                                                                                                                                         |
-| `--keep N`                                    | After a successful backup, prune oldest archives until at most `N` remain per service. Also accepted by `backup prune`. Pre-restore archives are not counted or pruned.                                                            |
-| `--older-than DUR`                            | For `backup prune`: delete archives older than `DUR`. `DUR` is `<N><unit>` with unit one of `s`, `m` (minutes), `h`, `d`, `w` — e.g. `30d`, `12h`, `2w`.                                                                           |
-| `--service NAME`                              | For `backup prune`: restrict pruning to a single service.                                                                                                                                                                          |
-| `--backup <name\|latest\|pre-restore-latest>` | For `restore`: select a backup non-interactively. `latest` picks the newest regular archive by mtime; `pre-restore-latest` picks the newest pre-restore archive; any other value is an exact filename (`.tar.gz` suffix optional). |
-| `--yes`                                       | For `restore`: auto-accept the pre-restore snapshot prompt. Mutually exclusive with `--no-pre-restore`.                                                                                                                            |
-| `--no-pre-restore`                            | For `restore`: skip the pre-restore snapshot entirely (no prompt, no archive created). Mutually exclusive with `--yes`.                                                                                                            |
+| Option                                        | Description                                                                                                                                                                                                                                     |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--dry-run`                                   | Print the commands that would be executed without running them (applies to: `create-network`, `start`, `stop`, `restart`, `pull`, `backup`, `restore`, `update`, `logs`, `ps`, `exec`)                                                          |
+| `--check`                                     | Check if an update is available without installing; only valid for `update`                                                                                                                                                                     |
+| `--no-health`                                 | Skip post-start container health polling (applies to: `start`, `restart`)                                                                                                                                                                       |
+| `--health-timeout N`                          | Seconds to poll for running state after `docker compose up -d`; default `15` (applies to: `start`, `restart`)                                                                                                                                   |
+| `--all`                                       | Include disabled services in `start`/`stop`/`restart`/`pull`/`logs`/`ps`/`exec`; loop over all services (including disabled) for `backup`/`restore` (applies to: `start`, `stop`, `restart`, `pull`, `backup`, `restore`, `logs`, `ps`, `exec`) |
+| `--follow, -f`                                | Follow log output (like `tail -f`); only valid for `logs`                                                                                                                                                                                       |
+| `--tail N`                                    | Show N lines from the end of the logs; only valid for `logs`                                                                                                                                                                                    |
+| `--live`                                      | Skip stop/start around backup; back up while the service is running (applies to: `backup`)                                                                                                                                                      |
+| `--live`                                      | Skip stop/start around backup; back up while the service is running (applies to: `backup`)                                                                                                                                                      |
+| `--keep N`                                    | After a successful backup, prune oldest archives until at most `N` remain per service. Also accepted by `backup prune`. Pre-restore archives are not counted or pruned.                                                                         |
+| `--older-than DUR`                            | For `backup prune`: delete archives older than `DUR`. `DUR` is `<N><unit>` with unit one of `s`, `m` (minutes), `h`, `d`, `w` — e.g. `30d`, `12h`, `2w`.                                                                                        |
+| `--service NAME`                              | For `backup prune`: restrict pruning to a single service.                                                                                                                                                                                       |
+| `--backup <name\|latest\|pre-restore-latest>` | For `restore`: select a backup non-interactively. `latest` picks the newest regular archive by mtime; `pre-restore-latest` picks the newest pre-restore archive; any other value is an exact filename (`.tar.gz` suffix optional).              |
+| `--yes`                                       | For `restore`: auto-accept the pre-restore snapshot prompt. Mutually exclusive with `--no-pre-restore`.                                                                                                                                         |
+| `--no-pre-restore`                            | For `restore`: skip the pre-restore snapshot entirely (no prompt, no archive created). Mutually exclusive with `--yes`.                                                                                                                         |
 
 All options can appear anywhere after the command.
 
@@ -151,6 +157,27 @@ mcli restore my-service --backup 2026-06-01.tar.gz --yes
 
 # Restore the most recent pre-restore snapshot
 mcli restore my-service --backup pre-restore-latest --no-pre-restore
+
+# Tail logs for a service
+mcli logs my-service
+
+# Follow logs in real time
+mcli logs my-service --follow
+
+# Show the last 50 lines of logs
+mcli logs my-service --tail 50
+
+# Show container status for all services
+mcli ps
+
+# Show container status for specific services
+mcli ps traefik postgres
+
+# Execute a command in a running container
+mcli exec my-service ls -la /app
+
+# Preview exec without running it
+mcli exec my-service --dry-run ls -la /app
 ```
 
 ## Service Discovery
@@ -209,6 +236,12 @@ source <(mcli completions zsh)
 Completions cover all commands and, for commands that operate on services, dynamically suggest discovered service names.
 
 ## Changelog
+
+### 0.17.0
+
+- Added `mcli logs <service> [--follow|-f] [--tail N]`: thin wrapper around `docker compose logs` to tail logs for a service; respects `--dry-run` and skips disabled services unless `--all`
+- Added `mcli ps [services..]`: thin wrapper around `docker compose ps` to show container status; no args shows all services; respects `--dry-run` and skips disabled services unless `--all`
+- Added `mcli exec <service> <cmd> [args..]`: thin wrapper around `docker compose exec` to run a command in a running container; respects `--dry-run` and skips disabled services unless `--all`
 
 ### 0.16.0
 
