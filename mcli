@@ -619,7 +619,7 @@ check_service_health() {
 			running)
 				return 0
 				;;
-			*restarting*|*exited*|*dead*)
+			*restarting*|*exited*|*dead*|*paused*)
 				error "${CYAN}${service}${RESET} container state: ${states//$'\n'/ }"
 				return 1
 				;;
@@ -627,6 +627,7 @@ check_service_health() {
 		sleep 1
 	done
 	states=$(docker compose --project-directory "$service" ps --format '{{.State}}' 2>/dev/null | sort -u)
+	[[ "$states" == "running" ]] && return 0
 	error "${CYAN}${service}${RESET} did not reach running state within ${health_timeout}s (state: ${states:-unknown})"
 	return 1
 }
@@ -1586,6 +1587,10 @@ fi
 if ($no_health || $health_timeout_set) && [[ "${COMMAND}" != "start" && "${COMMAND}" != "restart" ]]; then
 	error "--no-health and --health-timeout are only valid for 'start' and 'restart'"
 	exit 1
+fi
+
+if $no_health && $health_timeout_set; then
+	printf "${YELLOW}warning:${RESET} --health-timeout has no effect when --no-health is set\n" >&2
 fi
 
 case "${COMMAND}" in
