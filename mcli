@@ -1553,9 +1553,7 @@ completions() {
 # Source this file or add to ~/.bashrc: source <(mcli completions bash)
 
 __mcli_services() {
-	mcli list 2>/dev/null \
-		| sed 's/\x1b\[[0-9;]*m//g; s/^ *//; s/ (disabled)//' \
-		| grep -v '^(none found)$' | grep -v '^$'
+	mcli list --plain 2>/dev/null
 }
 
 _mcli() {
@@ -1646,7 +1644,7 @@ _mcli() {
 		return
 	fi
 
-	services=(${(f)"$(mcli list 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g; s/^ *//; s/ (disabled)//' | grep -v '^(none found)$' | grep -v '^$')"})
+	services=(${(f)"$(mcli list --plain 2>/dev/null)"})
 
 	case "$cmd" in
 	start | restart)
