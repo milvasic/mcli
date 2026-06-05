@@ -87,6 +87,8 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | `--backup <name\|latest\|pre-restore-latest>` | For `restore`: select a backup non-interactively. `latest` picks the newest regular archive by mtime; `pre-restore-latest` picks the newest pre-restore archive; any other value is an exact filename (`.tar.gz` suffix optional).              |
 | `--yes`                                       | For `restore`: auto-accept the pre-restore snapshot prompt. Mutually exclusive with `--no-pre-restore`.                                                                                                                                         |
 | `--no-pre-restore`                            | For `restore`: skip the pre-restore snapshot entirely (no prompt, no archive created). Mutually exclusive with `--yes`.                                                                                                                         |
+| `--sudo`                                      | For `backup`/`restore`: always run `tar` (and `find` for restore) with `sudo`, even when not needed.                                                                                                                                            |
+| `--no-sudo`                                   | For `backup`/`restore`: never run `tar` (and `find` for restore) with `sudo`. Useful for CI or user-owned service dirs. By default (`auto`), `sudo` is used only when any file under the service directory is unreadable by the current user.   |
 
 All options can appear anywhere after the command.
 
@@ -247,7 +249,12 @@ Completions cover all commands and, for commands that operate on services, dynam
 
 ## Changelog
 
-### 0.18.0
+### 0.19.0
+
+- `backup` and `restore` now detect whether `sudo` is needed before invoking `tar` (and `find` for restore cleanup): if every file under the service directory is readable by the current user, `sudo` is skipped automatically — no prompt, no friction for user-owned service directories
+- Added `--sudo` / `--no-sudo` flags to `backup` and `restore` to override the auto-detection: `--sudo` always adds `sudo`; `--no-sudo` always omits it (useful for CI or unattended runs where `sudo` would block)
+
+### 0.18.1
 
 - Added `--json` flag to `list` and `backup size` for machine-readable JSON output (stdout only; status messages remain on stderr)
 - Added `--plain` flag to `list` for one-service-per-line output with no decoration

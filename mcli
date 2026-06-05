@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.18.1"
+VERSION="0.19.0"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -75,6 +75,10 @@ Options:
                             #   (applicable to: restore; mutually exclusive with --no-pre-restore)
   --no-pre-restore          # Skip the pre-restore snapshot entirely (do not prompt, do not create)
                             #   (applicable to: restore; mutually exclusive with --yes)
+  --sudo                    # Always run tar (and find for restore) with sudo
+                            #   (applicable to: backup, restore)
+  --no-sudo                 # Never run tar (and find for restore) with sudo
+                            #   (applicable to: backup, restore; mutually exclusive with --sudo)
   --json                    # Output in JSON format (machine-readable)
                              #   (applicable to: list, backup size)
   --plain                   # Output in plain text (one item per line, no decoration)
@@ -1009,6 +1013,27 @@ backup_size() {
 	rm -f "$err_file"
 }
 
+# Returns 0 (true, needs sudo) if any path under $1 is not readable by current user.
+# Used as a heuristic: root-owned docker volume mounts typically fail this check.
+_dir_needs_sudo() {
+	local dir="$1"
+	while IFS= read -r f; do
+		[ ! -r "$f" ] && return 0
+	done < <(find "$dir" 2>/dev/null)
+	return 1
+}
+
+# Returns 0 if sudo should be prepended based on $use_sudo and directory access.
+# use_sudo=auto: detect via _dir_needs_sudo; true/false: honour explicit override.
+_should_use_sudo() {
+	local dir="$1"
+	case "$use_sudo" in
+		true)  return 0 ;;
+		false) return 1 ;;
+		auto)  _dir_needs_sudo "$dir" ;;
+	esac
+}
+
 backup() {
 	if $output_json && ! { [ $# -eq 1 ] && [ "$1" = "size" ] && ! is_known_service "size"; }; then
 		error "--json is only valid for 'backup size'"
@@ -1135,7 +1160,9 @@ backup_one() {
 			dest="${base}.${counter}.tar.gz"
 		fi
 		log "Backing up ${CYAN}${service}${RESET} to ${dest}"
-		dry_run_log "mkdir -p \"${bkp_dir}\" && sudo tar czf \"${dest}\" -C \"${service}\" . -C \"\$(mktemp -d)\" image.txt"
+		local _bkp_sudo=""
+		_should_use_sudo "$service" && _bkp_sudo="sudo "
+		dry_run_log "mkdir -p \"${bkp_dir}\" && ${_bkp_sudo}tar czf \"${dest}\" -C \"${service}\" . -C \"\$(mktemp -d)\" image.txt"
 	else
 		mkdir -p "$bkp_dir"
 		# Install the cleanup trap before claiming the slot so a Ctrl-C between
@@ -1170,7 +1197,10 @@ backup_one() {
 		else
 			> "$tmp_dir/image.txt"
 		fi
-		if ! sudo tar czf "${dest}" -C "${service}" . -C "$tmp_dir" image.txt; then
+		local -a _bkp_cmd=()
+		_should_use_sudo "$service" && _bkp_cmd+=(sudo)
+		_bkp_cmd+=(tar czf "${dest}" -C "${service}" . -C "$tmp_dir" image.txt)
+		if ! "${_bkp_cmd[@]}"; then
 			trap - INT TERM EXIT
 			error "Backup of ${CYAN}${service}${RESET} failed"
 			rm -f "$dest"
@@ -1455,15 +1485,17 @@ restore_one() {
 	fi
 
 	# Pre-restore backup prompt (after stop, so the archive captures a clean state)
+	local _pre_snap_sudo=""
+	_should_use_sudo "$service" && _pre_snap_sudo="sudo "
 	if $dry_run; then
 		if $no_pre_restore; then
 			dry_run_log "Skipping pre-restore snapshot (--no-pre-restore)"
 		elif $auto_yes; then
 			dry_run_log "Auto-accepting pre-restore snapshot (--yes)"
-			dry_run_log "sudo tar czf \"${bkp_dir}/pre-restore/<date>.tar.gz\" -C \"${service}\" ."
+			dry_run_log "${_pre_snap_sudo}tar czf \"${bkp_dir}/pre-restore/<date>.tar.gz\" -C \"${service}\" ."
 		else
 			dry_run_log "Prompt: 'Back up current version before restoring? [y/N]'"
-			dry_run_log "sudo tar czf \"${bkp_dir}/pre-restore/<date>.tar.gz\" -C \"${service}\" ."
+			dry_run_log "${_pre_snap_sudo}tar czf \"${bkp_dir}/pre-restore/<date>.tar.gz\" -C \"${service}\" ."
 		fi
 	elif $no_pre_restore; then
 		: # skip silently
@@ -1489,7 +1521,10 @@ restore_one() {
 				pre_restore_dest="${pre_restore_dir}/${today}.${counter}.tar.gz"
 			fi
 			log "Creating pre-restore backup of ${CYAN}${service}${RESET}"
-			if ! sudo tar czf "$pre_restore_dest" -C "$service" .; then
+			local -a _pre_snap_cmd=()
+			_should_use_sudo "$service" && _pre_snap_cmd+=(sudo)
+			_pre_snap_cmd+=(tar czf "$pre_restore_dest" -C "$service" .)
+			if ! "${_pre_snap_cmd[@]}"; then
 				error "Failed to create pre-restore backup"
 				log "Restarting ${CYAN}${service}${RESET} after failed pre-restore backup"
 				docker compose --project-directory "$service" up -d || true
@@ -1503,7 +1538,9 @@ restore_one() {
 	# the backup would otherwise survive, since tar only overwrites overlapping
 	# paths). Note: this also wipes bind-mounted paths nested under $service.
 	log "Cleaning ${service}/ before extraction"
-	local -a clean_cmd=(sudo find "$service" -mindepth 1 -delete)
+	local -a clean_cmd=()
+	_should_use_sudo "$service" && clean_cmd+=(sudo)
+	clean_cmd+=(find "$service" -mindepth 1 -delete)
 	if $dry_run; then
 		dry_run_log "$(print_cmd "${clean_cmd[@]}")"
 	else
@@ -1517,7 +1554,9 @@ restore_one() {
 
 	# Extract archive into service directory
 	log "Extracting $(basename "$chosen") into ${service}/"
-	local -a restore_cmd=(sudo tar xzf "$chosen" -C "$service")
+	local -a restore_cmd=()
+	_should_use_sudo "$service" && restore_cmd+=(sudo)
+	restore_cmd+=(tar xzf "$chosen" -C "$service")
 	if $dry_run; then
 		dry_run_log "$(print_cmd "${restore_cmd[@]}")"
 	else
@@ -1591,10 +1630,10 @@ _mcli() {
 		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run" -- "$cur"))
 		;;
 	restore)
-		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run --all --backup --yes --no-pre-restore" -- "$cur"))
+		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run --all --backup --yes --no-pre-restore --sudo --no-sudo" -- "$cur"))
 		;;
 	backup)
-		COMPREPLY=($(compgen -W "size prune $(__mcli_services) --dry-run --json --live --all --keep --older-than --service" -- "$cur"))
+		COMPREPLY=($(compgen -W "size prune $(__mcli_services) --dry-run --json --live --all --keep --older-than --service --sudo --no-sudo" -- "$cur"))
 		;;
 	completions)
 		COMPREPLY=($(compgen -W "bash zsh" -- "$cur"))
@@ -1669,7 +1708,7 @@ _mcli() {
 		;;
 	restore)
 		compadd -a services
-		compadd -- --dry-run --all --backup --yes --no-pre-restore
+		compadd -- --dry-run --all --backup --yes --no-pre-restore --sudo --no-sudo
 		;;
 	list)
 		compadd -- --json --plain
@@ -1677,7 +1716,7 @@ _mcli() {
 	backup)
 		compadd -- size prune
 		compadd -a services
-		compadd -- --dry-run --json --live --all --keep --older-than --service
+		compadd -- --dry-run --json --live --all --keep --older-than --service --sudo --no-sudo
 		;;
 	completions)
 		compadd -- bash zsh
@@ -1797,6 +1836,7 @@ health_timeout_set=false
 backup_name=""
 auto_yes=false
 no_pre_restore=false
+use_sudo="auto"
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--dry-run)
@@ -1900,6 +1940,14 @@ while [[ $# -gt 0 ]]; do
 		no_pre_restore=true
 		shift
 		;;
+	--sudo)
+		use_sudo="true"
+		shift
+		;;
+	--no-sudo)
+		use_sudo="false"
+		shift
+		;;
 	-*)
 		error "Unknown option: $1"
 		exit 1
@@ -1925,6 +1973,12 @@ if $auto_yes && $no_pre_restore; then
 	error "--yes and --no-pre-restore are mutually exclusive"
 	exit 1
 fi
+
+if [[ "$use_sudo" != "auto" ]] && [[ "${COMMAND}" != "backup" && "${COMMAND}" != "restore" ]]; then
+	error "--sudo and --no-sudo are only valid for 'backup' and 'restore'"
+	exit 1
+fi
+
 
 if $check_only && [[ "${COMMAND}" != "update" ]]; then
 	error "--check is only valid for 'update'"
