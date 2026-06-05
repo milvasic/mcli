@@ -1031,6 +1031,7 @@ _should_use_sudo() {
 		true)  return 0 ;;
 		false) return 1 ;;
 		auto)  _dir_needs_sudo "$dir" ;;
+		*)     return 0 ;;
 	esac
 }
 
@@ -1837,6 +1838,8 @@ backup_name=""
 auto_yes=false
 no_pre_restore=false
 use_sudo="auto"
+_sudo_flag=false
+_no_sudo_flag=false
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--dry-run)
@@ -1941,11 +1944,11 @@ while [[ $# -gt 0 ]]; do
 		shift
 		;;
 	--sudo)
-		use_sudo="true"
+		use_sudo="true"; _sudo_flag=true
 		shift
 		;;
 	--no-sudo)
-		use_sudo="false"
+		use_sudo="false"; _no_sudo_flag=true
 		shift
 		;;
 	-*)
@@ -1979,6 +1982,10 @@ if [[ "$use_sudo" != "auto" ]] && [[ "${COMMAND}" != "backup" && "${COMMAND}" !=
 	exit 1
 fi
 
+if $_sudo_flag && $_no_sudo_flag; then
+	error "--sudo and --no-sudo are mutually exclusive"
+	exit 1
+fi
 
 if $check_only && [[ "${COMMAND}" != "update" ]]; then
 	error "--check is only valid for 'update'"
