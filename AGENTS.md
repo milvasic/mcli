@@ -42,6 +42,16 @@ The version is hardcoded as `VERSION` near the top of `./mcli`. Follow semver:
 - **Minor** (`0.x.0`): new commands or new options
 - **No bump**: doc-only changes (`README.md`, `AGENTS.md`, comments)
 
+## Release checklist
+
+Every release that changes `./mcli` **must** update `SHA256SUMS` before merging:
+
+```sh
+sha256sum mcli > SHA256SUMS
+```
+
+`install.sh` fetches this file at install time and aborts if the checksum does not match. A release without an updated `SHA256SUMS` will break all installs.
+
 ## Validation
 
 There is no test suite. After making changes, verify syntax with:

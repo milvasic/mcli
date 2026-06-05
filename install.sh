@@ -15,6 +15,7 @@ INSTALL_DIR="/usr/local/bin"
 ASSET_TYPE="script"
 ASSET_URL="https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/mcli"
 INSTALLER_URL="https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/install.sh"
+CHECKSUM_URL="https://raw.githubusercontent.com/milvasic/mcli/refs/heads/main/SHA256SUMS"
 # VERSION_URL=""  # only needed for ASSET_TYPE=binary
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -122,6 +123,33 @@ fetch_url() {
 	fi
 }
 
+# Compute SHA-256 of a local file; works on Linux (sha256sum) and macOS (shasum).
+sha256_of() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | awk '{print $1}'
+	elif command -v shasum >/dev/null 2>&1; then
+		shasum -a 256 "$1" | awk '{print $1}'
+	else
+		error "Neither sha256sum nor shasum found. Cannot verify checksum."
+		exit 1
+	fi
+}
+
+# Verify the downloaded asset's SHA-256 against the published checksum file.
+verify_checksum() {
+	local expected got
+	expected="$(fetch_url "$CHECKSUM_URL" | awk -v f="$BINARY_NAME" '$2==f{print $1}')"
+	if [ -z "$expected" ]; then
+		error "Checksum for ${BINARY_NAME} not found in ${CHECKSUM_URL}."
+		exit 1
+	fi
+	got="$(sha256_of "$TMPFILE")"
+	if [ "$expected" != "$got" ]; then
+		error "Checksum mismatch for ${BINARY_NAME}: expected ${expected}, got ${got}."
+		exit 1
+	fi
+}
+
 # Download the asset to a temp file; sets TMPFILE.
 # Optional argument: version string — substituted for {VERSION} in ASSET_URL.
 download_asset() {
@@ -221,6 +249,8 @@ install() {
 		trap 'rm -f "$TMPFILE"' EXIT
 		;;
 	esac
+
+	verify_checksum
 
 	if [ -z "$remote_version" ]; then
 		error "Could not determine version from remote."
