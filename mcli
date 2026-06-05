@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.19.0"
+VERSION="0.20.0"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help() {
@@ -32,6 +32,8 @@ Commands:
   restore <service> --backup latest     # Restore from the newest regular backup (by mtime)
   restore <service> --backup pre-restore-latest  # Restore from the newest pre-restore archive (by mtime)
   restore --all             # Restore every enabled service in turn; interactive picker per service
+  diff <service>            # Compare current service directory against a backup archive; interactive picker when multiple backups exist
+  diff <service> --backup <name|latest>  # Non-interactive backup selection
   disable <services..>      # Disable one or more services (excluded from start/stop/restart/pull)
   enable <services..>       # Re-enable one or more previously disabled services
   update                    # Update mcli to the latest version
@@ -75,10 +77,14 @@ Options:
                             #   (applicable to: restore; mutually exclusive with --no-pre-restore)
   --no-pre-restore          # Skip the pre-restore snapshot entirely (do not prompt, do not create)
                             #   (applicable to: restore; mutually exclusive with --yes)
+  --unified                 # Show full unified diff output instead of brief summary
+                            #   (applicable to: diff)
+  --images-only             # Show only image-version drift, skip file diff
+                            #   (applicable to: diff)
   --sudo                    # Always run tar (and find for restore) with sudo
-                            #   (applicable to: backup, restore)
+                            #   (applicable to: backup, restore, diff)
   --no-sudo                 # Never run tar (and find for restore) with sudo
-                            #   (applicable to: backup, restore; mutually exclusive with --sudo)
+                            #   (applicable to: backup, restore, diff; mutually exclusive with --sudo)
   --json                    # Output in JSON format (machine-readable)
                              #   (applicable to: list, backup size)
   --plain                   # Output in plain text (one item per line, no decoration)
@@ -161,7 +167,7 @@ print_cmd() {
 colorize_line() {
 	sed \
 		-e "s/\\(^\\|[^[:alnum:]_'-]\\)\\(mcli\\)\\([^[:alnum:]_'-]\\|$\\)/\\1${GREEN}\\2${RESET}\\3/g" \
-		-e "s/\\(^\\|[^[:alnum:]_'-]\\)\\(list\\|create-network\\|start\\|stop\\|restart\\|pull\\|backup\\|restore\\|enable\\|disable\\|update\\|logs\\|ps\\|exec\\|completions\\|version\\|help\\)\\([^[:alnum:]_'-]\\|$\\)/\\1${YELLOW}\\2${RESET}\\3/g" \
+		-e "s/\\(^\\|[^[:alnum:]_'-]\\)\\(list\\|create-network\\|start\\|stop\\|restart\\|pull\\|backup\\|restore\\|diff\\|enable\\|disable\\|update\\|logs\\|ps\\|exec\\|completions\\|version\\|help\\)\\([^[:alnum:]_'-]\\|$\\)/\\1${YELLOW}\\2${RESET}\\3/g" \
 		-e "s/--[a-z][a-z-]*/${CYAN}&${RESET}/g" \
 		-e "s/\([ ,]\)\(-[a-z]\)/\\1${CYAN}\\2${RESET}/g"
 }
@@ -1583,6 +1589,220 @@ restore_one() {
 	fi
 }
 
+# ── Diff command ─────────────────────────────────────────────────────────────
+diff_cmd() {
+	if [ $# -ne 1 ]; then
+		error "Usage: mcli diff <service> [--backup <name|latest>] [--unified] [--images-only]"
+		return 1
+	fi
+	local service="$1"
+	if ! is_known_service "$service"; then
+		error "Unknown service: ${CYAN}${service}${RESET}"
+		return 1
+	fi
+	diff_one "$service"
+}
+
+diff_one() {
+	local service="$1"
+	local bkp_dir=".bkp/${service}"
+
+	# Collect available backups: regular first, then pre-restore (same as restore_one)
+	local backups=() labels=()
+	shopt -s nullglob
+	for f in "${bkp_dir}"/*.tar.gz; do
+		backups+=("$f")
+		labels+=("$(basename "$f")")
+	done
+	for f in "${bkp_dir}"/pre-restore/*.tar.gz; do
+		backups+=("$f")
+		labels+=("[pre-restore] $(basename "$f")")
+	done
+	shopt -u nullglob
+
+	if [ ${#backups[@]} -eq 0 ]; then
+		error "No backups found for ${CYAN}${service}${RESET} in ${bkp_dir}/"
+		return 1
+	fi
+
+	# Archive selection (mirrors restore_one logic)
+	local chosen chosen_label
+	if [[ -n "$backup_name" ]]; then
+		case "$backup_name" in
+		latest)
+			shopt -s nullglob
+			local regular_files=("${bkp_dir}"/*.tar.gz)
+			shopt -u nullglob
+			if [ ${#regular_files[@]} -eq 0 ]; then
+				error "No regular backups found for ${CYAN}${service}${RESET} in ${bkp_dir}/"
+				return 1
+			fi
+			chosen=$(stat -c '%Y %n' "${regular_files[@]}" | sort -rn | head -1 | cut -d' ' -f2-)
+			chosen_label="$(basename "$chosen")"
+			;;
+		pre-restore-latest)
+			shopt -s nullglob
+			local pre_files=("${bkp_dir}"/pre-restore/*.tar.gz)
+			shopt -u nullglob
+			if [ ${#pre_files[@]} -eq 0 ]; then
+				error "No pre-restore backups found for ${CYAN}${service}${RESET} in ${bkp_dir}/pre-restore/"
+				return 1
+			fi
+			chosen=$(stat -c '%Y %n' "${pre_files[@]}" | sort -rn | head -1 | cut -d' ' -f2-)
+			chosen_label="[pre-restore] $(basename "$chosen")"
+			;;
+		*)
+			if [[ "$backup_name" == */* ]]; then
+				error "--backup must be a plain filename, not a path (got: '${backup_name}')"
+				return 1
+			fi
+			local lookup="$backup_name"
+			[[ "$lookup" != *.tar.gz ]] && lookup="${lookup}.tar.gz"
+			local candidate_regular="${bkp_dir}/${lookup}"
+			local candidate_pre="${bkp_dir}/pre-restore/${lookup}"
+			local found_regular=false found_pre=false
+			[ -f "$candidate_regular" ] && found_regular=true
+			[ -f "$candidate_pre" ] && found_pre=true
+			if $found_regular && $found_pre; then
+				error "Ambiguous --backup '${backup_name}': found in both ${bkp_dir}/ and ${bkp_dir}/pre-restore/. Rename one of the conflicting archives."
+				return 1
+			elif $found_regular; then
+				chosen="$candidate_regular"
+				chosen_label="$(basename "$chosen")"
+			elif $found_pre; then
+				chosen="$candidate_pre"
+				chosen_label="[pre-restore] $(basename "$chosen")"
+			else
+				error "--backup '${backup_name}' not found under ${bkp_dir}/ or ${bkp_dir}/pre-restore/"
+				log "Available backups for ${CYAN}${service}${RESET}:"
+				local i=1
+				for label in "${labels[@]}"; do
+					printf "  %d) %s\n" "$i" "$label" >&2
+					((i++))
+				done
+				return 1
+			fi
+			;;
+		esac
+		log "Comparing ${CYAN}${service}${RESET} against ${chosen_label}"
+	elif [ ${#backups[@]} -eq 1 ]; then
+		chosen="${backups[0]}"
+		chosen_label="${labels[0]}"
+		log "Comparing ${CYAN}${service}${RESET} against ${chosen_label}"
+	elif $dry_run; then
+		log "Available backups for ${CYAN}${service}${RESET}:"
+		local i=1
+		for label in "${labels[@]}"; do
+			printf "  %d) %s\n" "$i" "$label" >&2
+			((i++))
+		done
+		dry_run_log "Would prompt: Select backup [1-${#backups[@]}]"
+		chosen="${backups[0]}"
+		chosen_label="${labels[0]}"
+		log "Comparing ${CYAN}${service}${RESET} against ${chosen_label} (dry-run: using first)"
+	else
+		log "Available backups for ${CYAN}${service}${RESET}:"
+		local i=1
+		for label in "${labels[@]}"; do
+			printf "  %d) %s\n" "$i" "$label" >&2
+			((i++))
+		done
+		local choice
+		while true; do
+			printf "Select backup [1-%d]: " "${#backups[@]}" >&2
+			read -r choice
+			if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#backups[@]}" ]; then
+				break
+			fi
+			error "Invalid selection. Enter a number between 1 and ${#backups[@]}."
+		done
+		chosen="${backups[$((choice - 1))]}"
+		chosen_label="${labels[$((choice - 1))]}"
+		log "Comparing ${CYAN}${service}${RESET} against ${chosen_label}"
+	fi
+
+	if $dry_run; then
+		local _diff_sudo=""
+		_should_use_sudo "$service" && _diff_sudo="sudo "
+		dry_run_log "${_diff_sudo}tar xzf $(printf %q "$chosen") -C <tmp>"
+		if ! $images_only; then
+			if $unified; then
+				dry_run_log "diff -r --unified=3 --exclude=image.txt $(printf %q "$service") <tmp>/"
+			else
+				dry_run_log "diff -r --brief --exclude=image.txt $(printf %q "$service") <tmp>/"
+			fi
+		fi
+		dry_run_log "compare image.txt from archive vs currently running containers"
+		return 0
+	fi
+
+	# Extract archive to a temp directory
+	local tmp_dir
+	tmp_dir=$(mktemp -d)
+	trap 'rm -rf "$tmp_dir"' INT TERM EXIT
+
+	local -a extract_cmd=()
+	_should_use_sudo "$service" && extract_cmd+=(sudo)
+	extract_cmd+=(tar xzf "$chosen" -C "$tmp_dir")
+	if ! "${extract_cmd[@]}"; then
+		error "Failed to extract ${chosen}"
+		trap - INT TERM EXIT
+		rm -rf "$tmp_dir"
+		return 1
+	fi
+
+	local any_diff=false
+
+	# Image drift: compare archive image.txt against currently running containers
+	log "Image versions for ${CYAN}${service}${RESET} (backup vs current)"
+	if [ -f "$tmp_dir/image.txt" ]; then
+		local archive_images current_images
+		archive_images=$(sort "$tmp_dir/image.txt")
+		current_images=$(capture_image_info "$service" | sort)
+		if [[ "$archive_images" == "$current_images" ]]; then
+			ok "Images: no drift"
+		else
+			any_diff=true
+			diff \
+				--label "backup:${chosen_label}" \
+				--label "current:running" \
+				<(printf '%s\n' "$archive_images") \
+				<(printf '%s\n' "$current_images") || true
+		fi
+	else
+		printf "${YELLOW}note:${RESET} archive has no image.txt; skipping image drift\n" >&2
+	fi
+
+	# File diff
+	if ! $images_only; then
+		log "File diff for ${CYAN}${service}${RESET} (current vs backup)"
+		local -a diff_args=(diff -r --exclude=image.txt)
+		if $unified; then
+			diff_args+=(--unified=3)
+		else
+			diff_args+=(--brief)
+		fi
+		diff_args+=("$service" "$tmp_dir")
+		local diff_rc=0
+		"${diff_args[@]}" || diff_rc=$?
+		if [ $diff_rc -eq 0 ]; then
+			ok "Files: no differences"
+		elif [ $diff_rc -eq 1 ]; then
+			any_diff=true
+		else
+			error "diff encountered an error (exit code: $diff_rc)"
+			trap - INT TERM EXIT
+			rm -rf "$tmp_dir"
+			return 1
+		fi
+	fi
+
+	! $any_diff && ok "No differences found"
+
+	trap - INT TERM EXIT
+	rm -rf "$tmp_dir"
+}
+
 # ── Completions command ───────────────────────────────────────────────────────
 completions() {
 	local shell="${1:-}"
@@ -1601,7 +1821,7 @@ _mcli() {
 	local cur="${COMP_WORDS[COMP_CWORD]}"
 	local cword="$COMP_CWORD"
 	local command="${COMP_WORDS[1]:-}"
-	local all_commands="list create-network start stop restart pull logs ps exec backup restore disable enable update completions version help"
+	local all_commands="list create-network start stop restart pull logs ps exec backup restore diff disable enable update completions version help"
 
 	if [[ "$cword" -eq 1 ]]; then
 		COMPREPLY=($(compgen -W "$all_commands" -- "$cur"))
@@ -1635,6 +1855,9 @@ _mcli() {
 		;;
 	backup)
 		COMPREPLY=($(compgen -W "size prune $(__mcli_services) --dry-run --json --live --all --keep --older-than --service --sudo --no-sudo" -- "$cur"))
+		;;
+	diff)
+		COMPREPLY=($(compgen -W "$(__mcli_services) --dry-run --backup --unified --images-only --sudo --no-sudo" -- "$cur"))
 		;;
 	completions)
 		COMPREPLY=($(compgen -W "bash zsh" -- "$cur"))
@@ -1673,6 +1896,7 @@ _mcli() {
 			'exec:Execute a command in a running container'
 			'backup:Back up a service'
 			'restore:Restore a service from a backup archive'
+			'diff:Compare current service directory against a backup'
 			'disable:Disable one or more services'
 			'enable:Re-enable one or more services'
 			'update:Update mcli to the latest version'
@@ -1713,6 +1937,10 @@ _mcli() {
 		;;
 	list)
 		compadd -- --json --plain
+		;;
+	diff)
+		compadd -a services
+		compadd -- --dry-run --backup --unified --images-only --sudo --no-sudo
 		;;
 	backup)
 		compadd -- size prune
@@ -1837,6 +2065,8 @@ health_timeout_set=false
 backup_name=""
 auto_yes=false
 no_pre_restore=false
+unified=false
+images_only=false
 use_sudo="auto"
 _sudo_flag=false
 _no_sudo_flag=false
@@ -1943,6 +2173,14 @@ while [[ $# -gt 0 ]]; do
 		no_pre_restore=true
 		shift
 		;;
+	--unified)
+		unified=true
+		shift
+		;;
+	--images-only)
+		images_only=true
+		shift
+		;;
 	--sudo)
 		use_sudo="true"; _sudo_flag=true
 		shift
@@ -1967,8 +2205,13 @@ if [[ "${COMMAND}" != "backup" && ( -n "$older_than" || -n "$prune_service" ) ]]
 	exit 1
 fi
 
-if [[ -n "$backup_name" || $auto_yes == true || $no_pre_restore == true ]] && [[ "${COMMAND}" != "restore" ]]; then
-	error "--backup, --yes, and --no-pre-restore are only valid for 'restore'"
+if [[ -n "$backup_name" ]] && [[ "${COMMAND}" != "restore" && "${COMMAND}" != "diff" ]]; then
+	error "--backup is only valid for 'restore' and 'diff'"
+	exit 1
+fi
+
+if [[ $auto_yes == true || $no_pre_restore == true ]] && [[ "${COMMAND}" != "restore" ]]; then
+	error "--yes and --no-pre-restore are only valid for 'restore'"
 	exit 1
 fi
 
@@ -1977,8 +2220,8 @@ if $auto_yes && $no_pre_restore; then
 	exit 1
 fi
 
-if [[ "$use_sudo" != "auto" ]] && [[ "${COMMAND}" != "backup" && "${COMMAND}" != "restore" ]]; then
-	error "--sudo and --no-sudo are only valid for 'backup' and 'restore'"
+if [[ "$use_sudo" != "auto" ]] && [[ "${COMMAND}" != "backup" && "${COMMAND}" != "restore" && "${COMMAND}" != "diff" ]]; then
+	error "--sudo and --no-sudo are only valid for 'backup', 'restore', and 'diff'"
 	exit 1
 fi
 
@@ -2021,6 +2264,11 @@ if ($follow || [[ -n "$tail_count" ]]) && [[ "${COMMAND}" != "logs" ]]; then
 	exit 1
 fi
 
+if ($unified || $images_only) && [[ "${COMMAND}" != "diff" ]]; then
+	error "--unified and --images-only are only valid for 'diff'"
+	exit 1
+fi
+
 case "${COMMAND}" in
 	list) list ;;
 create-network) create_network ;;
@@ -2033,6 +2281,7 @@ ps) ps "${service_args[@]}" ;;
 exec) exec "${service_args[@]}" ;;
 backup) backup "${service_args[@]}" ;;
 restore) restore "${service_args[@]}" ;;
+diff) diff_cmd "${service_args[@]}" ;;
 enable) enable "${service_args[@]}" ;;
 disable) disable "${service_args[@]}" ;;
 update) update ;;
