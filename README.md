@@ -57,6 +57,8 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | `restore <service> --backup latest`             | Restore from the newest regular backup (by mtime), skipping the interactive picker.                                                                                                            |
 | `restore <service> --backup pre-restore-latest` | Restore from the newest pre-restore archive (by mtime).                                                                                                                                        |
 | `restore --all`                                 | Restore every enabled service in turn; interactive picker per service when multiple backups exist. Continues past per-service failures and reports all at the end.                             |
+| `diff <service>`                                | Compare the current service directory against a backup archive. Shows image-version drift (via `image.txt`) and a file diff. Interactive picker when multiple backups exist.                   |
+| `diff <service> --backup <name\|latest>`        | Non-interactive backup selection for `diff`. Accepts `latest` (newest regular archive by mtime), `pre-restore-latest`, or an exact filename (`.tar.gz` suffix optional).                       |
 | `disable <services..>`                          | Disable one or more services (excluded from start/stop/restart/pull)                                                                                                                           |
 | `enable <services..>`                           | Re-enable one or more previously disabled services                                                                                                                                             |
 | `update`                                        | Update mcli to the latest version                                                                                                                                                              |
@@ -84,11 +86,13 @@ mcli <command> [service1 [service2 ...]] [--dry-run] [--all]
 | `--keep N`                                    | After a successful backup, prune oldest archives until at most `N` remain per service. Also accepted by `backup prune`. Pre-restore archives are not counted or pruned.                                                                         |
 | `--older-than DUR`                            | For `backup prune`: delete archives older than `DUR`. `DUR` is `<N><unit>` with unit one of `s`, `m` (minutes), `h`, `d`, `w` — e.g. `30d`, `12h`, `2w`.                                                                                        |
 | `--service NAME`                              | For `backup prune`: restrict pruning to a single service.                                                                                                                                                                                       |
-| `--backup <name\|latest\|pre-restore-latest>` | For `restore`: select a backup non-interactively. `latest` picks the newest regular archive by mtime; `pre-restore-latest` picks the newest pre-restore archive; any other value is an exact filename (`.tar.gz` suffix optional).              |
+| `--backup <name\|latest\|pre-restore-latest>` | For `restore` and `diff`: select a backup non-interactively. `latest` picks the newest regular archive by mtime; `pre-restore-latest` picks the newest pre-restore archive; any other value is an exact filename (`.tar.gz` suffix optional).   |
 | `--yes`                                       | For `restore`: auto-accept the pre-restore snapshot prompt. Mutually exclusive with `--no-pre-restore`.                                                                                                                                         |
 | `--no-pre-restore`                            | For `restore`: skip the pre-restore snapshot entirely (no prompt, no archive created). Mutually exclusive with `--yes`.                                                                                                                         |
-| `--sudo`                                      | For `backup`/`restore`: always run `tar` (and `find` for restore) with `sudo`, even when not needed.                                                                                                                                            |
-| `--no-sudo`                                   | For `backup`/`restore`: never run `tar` (and `find` for restore) with `sudo`. Useful for CI or user-owned service dirs. By default (`auto`), `sudo` is used only when any file under the service directory is unreadable by the current user.   |
+| `--unified`                                   | For `diff`: show full unified diff output (3 lines of context) instead of a brief summary of changed files.                                                                                                                                     |
+| `--images-only`                               | For `diff`: show only image-version drift (compare `image.txt` from the archive against currently running containers); skip the file diff.                                                                                                      |
+| `--sudo`                                      | For `backup`/`restore`/`diff`: always run `tar` with `sudo`, even when not needed.                                                                                                                                                              |
+| `--no-sudo`                                   | For `backup`/`restore`/`diff`: never run `tar` with `sudo`. Useful for CI or user-owned service dirs. By default (`auto`), `sudo` is used only when any file under the service directory is unreadable by the current user.                     |
 
 All options can appear anywhere after the command.
 
@@ -190,6 +194,15 @@ mcli exec my-service ls -la /app
 
 # Preview exec without running it
 mcli exec my-service --dry-run ls -la /app
+
+# Compare current service directory against the latest backup (brief summary)
+mcli diff my-service --backup latest
+
+# Show a full unified diff against a specific backup
+mcli diff my-service --backup 2026-06-01.tar.gz --unified
+
+# Check only image-version drift (no file diff)
+mcli diff my-service --backup latest --images-only
 ```
 
 ## Service Discovery
@@ -248,6 +261,16 @@ source <(mcli completions zsh)
 Completions cover all commands and, for commands that operate on services, dynamically suggest discovered service names.
 
 ## Changelog
+
+### 0.20.0
+
+- Added `mcli diff <service>`: compares the current service directory against a backup archive without touching anything
+- Shows image-version drift by comparing `image.txt` from the archive against currently running containers; notes when the archive has no `image.txt`
+- Shows a recursive file diff (brief summary by default; `--unified` for full unified diff with 3 lines of context)
+- `--images-only` skips the file diff and shows only image-version drift — useful for "what would restore actually change visibly"
+- `--backup <name|latest|pre-restore-latest>` selects the archive non-interactively (same semantics as `restore --backup`); interactive picker shown when multiple backups exist
+- `--dry-run` logs all steps without extracting or reading anything
+- `--sudo` / `--no-sudo` control `tar` privilege for extracting archives created with root-owned files
 
 ### 0.19.0
 
