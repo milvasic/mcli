@@ -1724,12 +1724,12 @@ diff_one() {
 	if $dry_run; then
 		local _diff_sudo=""
 		_should_use_sudo "$service" && _diff_sudo="sudo "
-		dry_run_log "${_diff_sudo}tar xzf $(printf %q "$chosen") -C <tmp>"
+		dry_run_log "${_diff_sudo}tar xzf $(printf %q "$chosen") -C <tmp>/<archive-name>"
 		if ! $images_only; then
 			if $unified; then
-				dry_run_log "diff -r --unified=3 --exclude=image.txt $(printf %q "$service") <tmp>/"
+				dry_run_log "diff -r --unified=3 --exclude=image.txt $(printf %q "$service") <tmp>/<archive-name>/"
 			else
-				dry_run_log "diff -r --brief --exclude=image.txt $(printf %q "$service") <tmp>/"
+				dry_run_log "diff -r --brief --exclude=image.txt $(printf %q "$service") <tmp>/<archive-name>/"
 			fi
 		fi
 		dry_run_log "compare image.txt from archive vs currently running containers"
@@ -1740,10 +1740,14 @@ diff_one() {
 	local tmp_dir
 	tmp_dir=$(mktemp -d)
 	trap 'rm -rf "$tmp_dir"' INT TERM EXIT
+	local archive_subdir
+	archive_subdir="$(basename "$chosen" .tar.gz)"
+	local extract_dir="$tmp_dir/$archive_subdir"
+	mkdir "$extract_dir"
 
 	local -a extract_cmd=()
 	_should_use_sudo "$service" && extract_cmd+=(sudo)
-	extract_cmd+=(tar xzf "$chosen" -C "$tmp_dir")
+	extract_cmd+=(tar xzf "$chosen" -C "$extract_dir")
 	if ! "${extract_cmd[@]}"; then
 		error "Failed to extract ${chosen}"
 		trap - INT TERM EXIT
@@ -1755,19 +1759,27 @@ diff_one() {
 
 	# Image drift: compare archive image.txt against currently running containers
 	log "Image versions for ${CYAN}${service}${RESET} (backup vs current)"
-	if [ -f "$tmp_dir/image.txt" ]; then
+	if [ -f "$extract_dir/image.txt" ]; then
 		local archive_images current_images
-		archive_images=$(sort "$tmp_dir/image.txt")
+		archive_images=$(sort "$extract_dir/image.txt")
 		current_images=$(capture_image_info "$service" | sort)
 		if [[ "$archive_images" == "$current_images" ]]; then
 			ok "Images: no drift"
 		else
-			any_diff=true
+			local image_diff_rc=0
 			diff \
 				--label "backup:${chosen_label}" \
 				--label "current:running" \
 				<(printf '%s\n' "$archive_images") \
-				<(printf '%s\n' "$current_images") || true
+				<(printf '%s\n' "$current_images") || image_diff_rc=$?
+			if [ $image_diff_rc -eq 1 ]; then
+				any_diff=true
+			elif [ $image_diff_rc -ne 0 ]; then
+				error "diff encountered an error during image comparison (exit code: $image_diff_rc)"
+				trap - INT TERM EXIT
+				rm -rf "$tmp_dir"
+				return 1
+			fi
 		fi
 	else
 		printf "${YELLOW}note:${RESET} archive has no image.txt; skipping image drift\n" >&2
@@ -1782,7 +1794,7 @@ diff_one() {
 		else
 			diff_args+=(--brief)
 		fi
-		diff_args+=("$service" "$tmp_dir")
+		diff_args+=("$service" "$extract_dir")
 		local diff_rc=0
 		"${diff_args[@]}" || diff_rc=$?
 		if [ $diff_rc -eq 0 ]; then
@@ -1797,7 +1809,7 @@ diff_one() {
 		fi
 	fi
 
-	! $any_diff && ok "No differences found"
+	! $any_diff && ! $images_only && ok "No differences found"
 
 	trap - INT TERM EXIT
 	rm -rf "$tmp_dir"
@@ -2266,6 +2278,11 @@ fi
 
 if ($unified || $images_only) && [[ "${COMMAND}" != "diff" ]]; then
 	error "--unified and --images-only are only valid for 'diff'"
+	exit 1
+fi
+
+if $unified && $images_only; then
+	error "--unified has no effect with --images-only (file diff is skipped); use one or the other"
 	exit 1
 fi
 
